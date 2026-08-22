@@ -3,6 +3,7 @@
 //TODO:
 // 1.) check temp HP (bar2) before applying damage and use tmp pool first
 // 2.) manage bars as well
+// 3.) clamp to 0
 // 3.) whisper early returns for visibility into issues
 // 4.) add target function !hp +7 for selected token(s) !hp --target abcd123 -5 for specific targeted token
 on('ready', () => {
