@@ -8,25 +8,25 @@ A collection of Roll20 API (Mod) scripts for game management. Paste the contents
 
 | Script | Command | Depends on |
 |---|---|---|
-| [cards.js](#cardsjs--cards) | *(library — no commands)* | — |
+| [chatCards.js](#chatcardsjs--chatcards) | *(library — no commands)* | — |
 | [conditions.js](#conditionsjs--cond) | `!cond` | — |
 | [hp.js](#hpjs--hp) | `!hp` | — |
-| [partyman.js](#partymanjs--pm) | `!pm` | `cards.js` |
-| [passiveCheck.js](#passivecheckjs--pcheck) | `!pcheck` | `cards.js`, `partyman.js` |
+| [partyman.js](#partymanjs--pm) | `!pm` | `chatCards.js` |
+| [passiveCheck.js](#passivecheckjs--pcheck) | `!pcheck` | `chatCards.js`, `partyman.js` |
 | [statRoller.js](#statrollerjs--rollstats) | `!rollstats` | — |
 | [whimsy.js](#whimsyjs--whimsy) | `!whimsy` | — |
 
-Roll20 evaluates every script into one shared sandbox namespace, so the shared code is organized into IIFE namespaces (`Cards`, `PartyMan`, `PassiveCheck`) that each expose a single global and keep their helpers private. Cross-namespace references happen inside function bodies, at call time — so **script load order does not matter**.
+Roll20 evaluates every script into one shared sandbox namespace, so the shared code is organized into IIFE namespaces (`ChatCards`, `PartyMan`, `PassiveCheck`) that each expose a single global and keep their helpers private. Cross-namespace references happen inside function bodies, at call time — so **script load order does not matter**.
 
 ---
 
-## cards.js — `Cards`
+## chatCards.js — `ChatCards`
 
 A dependency-free library for the styled chat cards the other scripts share: a title bar over a table of rows. It has no chat commands of its own — install it because something else needs it, or to build your own output on it.
 
 Keeping the styling in one theme object means every tool built on it stays visually consistent, and a palette change lands everywhere at once.
 
-### `Cards.THEME`
+### `ChatCards.THEME`
 
 | Key | Applies to |
 |---|---|
@@ -40,15 +40,15 @@ Keeping the styling in one theme object means every tool built on it stays visua
 | `muted` | De-emphasized footnote text |
 | `button` | Chat buttons (`<a>` styled as a button) |
 
-Scripts building on Cards should speak in THEME keys rather than literal style strings.
+Scripts building on ChatCards should speak in THEME keys rather than literal style strings.
 
-### `Cards.Card`
+### `ChatCards.Card`
 
 | Member | What it does |
 |---|---|
-| `new Cards.Card(title, [theme])` | Starts a card; pass a theme object to override the shared `THEME` |
+| `new ChatCards.Card(title, [theme])` | Starts a card; pass a theme object to override the shared `THEME` |
 | `.addRow(...cells)` | Appends a row — chainable |
-| `Cards.Card.num(value)` | *(static)* Wraps a value as a right-aligned bold cell |
+| `ChatCards.Card.num(value)` | *(static)* Wraps a value as a right-aligned bold cell |
 | `.render()` | Returns the card's HTML |
 | `.whisperGM([from])` | Whispers the rendered card to the GM |
 | `.send([from])` | Sends the rendered card to public chat |
@@ -58,9 +58,9 @@ A cell is either a plain value (rendered with `THEME.cell`) or an object `{ cont
 ### Example
 
 ```js
-const card = new Cards.Card("Treasure Split")
-card.addRow("Ohi Saiweau", Cards.Card.num("120 gp"))
-    .addRow("Rondez the Green Mage", Cards.Card.num("120 gp"))
+const card = new ChatCards.Card("Treasure Split")
+card.addRow("Ohi Saiweau", ChatCards.Card.num("120 gp"))
+    .addRow("Rondez the Green Mage", ChatCards.Card.num("120 gp"))
 card.whisperGM("PartyFund")
 ```
 
@@ -149,7 +149,7 @@ SetHP:   !hp ?{New HP}
 - Clamp to 0
 - Whisper early-return reasons for better error visibility
 - Targeting: `!hp --target <token_id> -5` for a specific token instead of the selection
-- Possibly render results as a `Cards.Card` (would add a dependency to an otherwise standalone script)
+- Possibly render results as a `ChatCards.Card` (would add a dependency to an otherwise standalone script)
 
 (The file also contains a commented-out temp-HP example from the Roll20 API docs for reference.)
 
@@ -159,7 +159,7 @@ SetHP:   !hp ?{New HP}
 
 **PartyMan** — the party data layer. Originally planned as a pile of heuristics to identify party members, but the character object now carries an `inParty` flag, so it simply queries that. Other scripts (Passive Check, and anything else party-shaped) build on it.
 
-> **Requires:** `cards.js`.
+> **Requires:** `chatCards.js`.
 
 ### `PartyMan` namespace
 
@@ -169,16 +169,16 @@ SetHP:   !hp ?{New HP}
 | `getMembers()` | Wraps each party character in a `Member` |
 | `Member` | Snapshot of one party character: `id`, `characterName`, `characterSheet`, `controlledBy`, `avatar`, `defaultToken`, plus `syncDefaultToken()` |
 | `Party` | Builds the member list and kicks off a default-token sync for each member |
-| `memberCells(member)` | Returns the avatar + name cells for a `Cards.Card` row |
+| `memberCells(member)` | Returns the avatar + name cells for a `ChatCards.Card` row |
 
 `Member.syncDefaultToken()` returns a Promise, since Roll20 only exposes `_defaulttoken` through a callback.
 
 `memberCells` is the seam between the party data and the card renderer: spread it into a row, then append whatever the calling script needs.
 
 ```js
-const card = new Cards.Card("Passive Check — Insight")
+const card = new ChatCards.Card("Passive Check — Insight")
 for (const member of new PartyMan.Party().members) {
-    card.addRow(...PartyMan.memberCells(member), Cards.Card.num(score))
+    card.addRow(...PartyMan.memberCells(member), ChatCards.Card.num(score))
 }
 card.whisperGM("Passive Check")
 ```
@@ -211,7 +211,7 @@ Pass an optional DC to get a Success/Failure column per member (score ≥ DC suc
 
 ![Passive Check output — with DC](assets/pcheck-insight-dc.png)
 
-> **Requires:** `cards.js` and `partyman.js`.
+> **Requires:** `chatCards.js` and `partyman.js`.
 
 ### Usage
 
@@ -349,7 +349,7 @@ Tab order doesn't matter: everything runs inside `on('ready')` or resolves its d
 
 A few habits that keep these playing nicely in Roll20's shared sandbox:
 
-- **One global per script.** Shared code is wrapped in an IIFE that returns a namespace object (`Cards`, `PartyMan`, `PassiveCheck`); helpers that aren't part of the public surface stay private.
-- **Styling is data.** Card styles live in `Cards.THEME`, not in the functions that build the markup.
+- **One global per script.** Shared code is wrapped in an IIFE that returns a namespace object (`ChatCards`, `PartyMan`, `PassiveCheck`); helpers that aren't part of the public surface stay private.
+- **Styling is data.** Card styles live in `ChatCards.THEME`, not in the functions that build the markup.
 - **Reference across namespaces at call time**, never at evaluation time — that's what keeps load order irrelevant.
 - **Whisper by audience.** Results the GM shouldn't share go to the GM; help and error text goes back to the person who typed the command.

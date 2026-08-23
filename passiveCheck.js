@@ -1,6 +1,6 @@
 // PassiveCheck - whispers the party's passive skill scores (optionally vs a DC) to the GM
 // usage: !pcheck insight (returns passive insight scores) / !pcheck perception 12 (with success/fail)
-// Requires PartyMan (Party, Member, memberCells) and Cards (Card, THEME).
+// Requires PartyMan (Party, Member, memberCells) and ChatCards (Card, THEME).
 on('ready', () => {
     on('chat:message', async msg => {
         // process chat
@@ -64,8 +64,8 @@ on('ready', () => {
  * PassiveCheck namespace. Exposes only what the chat handler needs; everything
  * else stays private to the IIFE.
  *
- * Rendering goes through Cards.Card, so output stays on-theme with every
- * other Cards-based tool.
+ * Rendering goes through ChatCards.Card, so output stays on-theme with every
+ * other ChatCards-based tool.
  *
  * @namespace PassiveCheck
  * @property {Function} isValidType - Whether a string names a supported passive skill
@@ -144,18 +144,18 @@ const PassiveCheck = (() => {
      * @param {PartyMan.Party} party
      * @param {string} checkType - Any casing/spacing of a SKILLS entry.
      * @param {number} [dc] - Optional DC to judge against.
-     * @returns {Promise<Cards.Card>}
+     * @returns {Promise<ChatCards.Card>}
      */
     const buildCard = async (party, checkType, dc) => {
         const skill = normalize(checkType)
         const title = dc === undefined
             ? `Passive Check — ${displayName(skill)}`
             : `Passive Check - ${displayName(skill)} - DC: ${dc}`
-        const card = new Cards.Card(title)
+        const card = new ChatCards.Card(title)
 
         for (const pm of party.members) {
             const score = await getPassiveScore(pm.id, skill)
-            const scoreCell = Cards.Card.num(score === null ? NO_SCORE : score)
+            const scoreCell = ChatCards.Card.num(score === null ? NO_SCORE : score)
             if (dc === undefined) {
                 card.addRow(...PartyMan.memberCells(pm), scoreCell)
             } else {
@@ -167,12 +167,12 @@ const PassiveCheck = (() => {
     }
 
     /**
-     * Renders the help card from the SKILLS list, styled via Cards.THEME.
+     * Renders the help card from the SKILLS list, styled via ChatCards.THEME.
      *
      * @returns {string}
      */
     const helpText = () => {
-        const t = Cards.THEME
+        const t = ChatCards.THEME
         const usage = [
             ['!pcheck &lt;skill&gt;', 'Passive score for that skill, for each party member'],
             ['!pcheck &lt;skill&gt; &lt;dc&gt;', 'Adds Success/Failure vs the DC, e.g. <b>!pcheck insight 12</b>'],

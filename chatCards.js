@@ -1,15 +1,15 @@
-//Cards - generic styled chat-card generation for Roll20 VTT. No dependencies.
+//ChatCards - generic styled chat-card generation for Roll20 VTT. No dependencies.
 
 /**
- * Cards namespace. Generic chat-card rendering with a shared theme — no party
+ * ChatCards namespace. Generic chat-card rendering with a shared theme — no party
  * (or any other domain) knowledge. Scripts with domain-specific rows provide
  * their own cell helpers (e.g. PartyMan.memberCells).
  *
- * @namespace Cards
+ * @namespace ChatCards
  * @property {Object} THEME - Shared chat styling constants
  * @property {Class} Card - Chat-card builder
  */
-const Cards = (() => {
+const ChatCards = (() => {
 
     /*
     ***********************************************************************************
@@ -19,7 +19,7 @@ const Cards = (() => {
 
     /**
      * Shared styling for chat output. All card styling lives here — scripts
-     * building on Cards should speak in THEME keys, never literal styles.
+     * building on ChatCards should speak in THEME keys, never literal styles.
      */
     const THEME = {
         card:       "border:1px solid #444;border-radius:6px;overflow:hidden;font-size:12px;",
@@ -48,9 +48,9 @@ const Cards = (() => {
      * a raw CSS string.
      *
      * @example
-     * const card = new Cards.Card("Passive Check — Insight")
+     * const card = new ChatCards.Card("Passive Check — Insight")
      * for (const pm of party.members) {
-     *     card.addRow(...PartyMan.memberCells(pm), Cards.Card.num(score))
+     *     card.addRow(...PartyMan.memberCells(pm), ChatCards.Card.num(score))
      * }
      * card.whisperGM("Passive Check")
      */
@@ -120,18 +120,18 @@ const Cards = (() => {
         /**
          * Whispers the rendered card to the GM.
          *
-         * @param {string} [from='Cards'] - Chat sender name.
+         * @param {string} [from='ChatCards'] - Chat sender name.
          */
-        whisperGM(from = "Cards") {
+        whisperGM(from = "ChatCards") {
             sendChat(from, `/w gm ${this.render()}`)
         }
 
         /**
          * Sends the rendered card to public chat.
          *
-         * @param {string} [from='Cards'] - Chat sender name.
+         * @param {string} [from='ChatCards'] - Chat sender name.
          */
-        send(from = "Cards") {
+        send(from = "ChatCards") {
             sendChat(from, this.render())
         }
     }

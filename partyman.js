@@ -1,12 +1,12 @@
 //PartyMan - classes and utility for party management in Roll20 VTT
-// Requires Cards (THEME, Card) for chat output.
+// Requires ChatCards (THEME, Card) for chat output.
 on('ready', async () => {
     log("Starting PartyMan")
 
     let command = "!pm party"
     let commandName = "Display Party"
 
-    let htmlButton = `<a style="${Cards.THEME.button}" href="${command}">${commandName}</a>`;
+    let htmlButton = `<a style="${ChatCards.THEME.button}" href="${command}">${commandName}</a>`;
 
     sendChat('PartyMan', "PartyMan HTML:\n" + htmlButton)
 
@@ -24,7 +24,7 @@ on('ready', async () => {
         }
 
         if (cmd === 'party') {
-            const card = new Cards.Card("Party Roster")
+            const card = new ChatCards.Card("Party Roster")
             for (const member of new PartyMan.Party().members) {
                 card.addRow(...PartyMan.memberCells(member))
             }
@@ -42,7 +42,7 @@ on('ready', async () => {
  * @namespace PartyMan
  * @property {Function} getParty - Raw party character objects
  * @property {Function} getMembers - Party characters wrapped as Member instances
- * @property {Function} memberCells - Avatar + name cells for a Cards.Card row
+ * @property {Function} memberCells - Avatar + name cells for a ChatCards.Card row
  * @property {Class} Member - Snapshot of one party character
  * @property {Class} Party - The member collection
  */
@@ -132,20 +132,20 @@ const PartyMan = (() => {
     */
 
     /**
-     * The party-flavored row prefix for a Cards.Card: an avatar cell and a
+     * The party-flavored row prefix for a ChatCards.Card: an avatar cell and a
      * name cell. Spread it into addRow, then append whatever the script needs:
      *
-     *     card.addRow(...PartyMan.memberCells(pm), Cards.Card.num(score))
+     *     card.addRow(...PartyMan.memberCells(pm), ChatCards.Card.num(score))
      *
-     * References Cards only at call time, so script load order never matters.
+     * References ChatCards only at call time, so script load order never matters.
      *
      * @param {Member} member
-     * @returns {Array<string|{content: string, style: string}>} Cells for Cards.Card.addRow.
+     * @returns {Array<string|{content: string, style: string}>} Cells for ChatCards.Card.addRow.
      */
     const memberCells = (member) => {
         return [
             {
-                content: `<img src="${member.avatar}" style="${Cards.THEME.avatar}" alt="${member.characterName}">`,
+                content: `<img src="${member.avatar}" style="${ChatCards.THEME.avatar}" alt="${member.characterName}">`,
                 style: "avatarCell"
             },
             member.characterName
