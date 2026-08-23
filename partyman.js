@@ -1,8 +1,59 @@
+/**
+ {
+ "_id":"-P-AIVJfkPml5hIy4Mv-",
+ "_type":"character",
+ "_charactersheetname":"dnd2024byroll20",
+ "_defaulttoken":1787442649209,
+ "name":"Kekha Stormleaper Kalukigane",
+ "bio":"",
+ "gmnotes":"",
+ "archived":false,
+ "inplayerjournals":"",
+ "controlledby":"",
+ "avatar":"https://files.d20.io/images/458531169/49_sa9ZCskB0z6MuMzWRPw/med.png?1759254875",
+ "inParty":true,
+ "tags":"[\"_roll20_internal_party_tag_\"]",
+ "custom-attributes":{}
+ }
+ **/
 const getParty = () => {
     return findObjs({ _type: "character", inParty: true })
 }
 
-on('ready', () => {
+const getPartyMembers = () => {
+    return getParty().map(char => new PartyMember(char))
+}
+
+class Party {
+    constructor() {
+        this.members = getPartyMembers ()
+
+        for (let member of this.members) {
+            member.syncDefaultToken()
+        }
+    }
+}
+
+class PartyMember {
+    constructor(char) {
+        this.id = char.get("_id")
+        this.characterSheet = char.get("_charactersheetname")
+        this.characterName = char.get("name")
+        this.controlledBy = char.get("controlledby")
+        this.avatar = char.get("avatar")
+        this.defaultToken = {}
+
+    }
+
+    async syncDefaultToken() {
+        return await getObj("character", this.id).get("_defaulttoken", (_defaulttoken) => {
+            this.token = _defaulttoken
+            log(_defaulttoken)
+        })
+    }
+}
+
+on('ready', async () => {
     log("Starting PartyMan")
 
     // Define button styling inside the HTML string
@@ -30,8 +81,9 @@ on('ready', () => {
         };
 
         if (cmd === 'party') {
-            getParty().forEach(c => {
-                sendChat('PartyMan', `Party Member: ${c.get("name")}`)
+            new Party().members.forEach(c => {
+                log(c)
+                sendChat('PartyMan', `Party Member: ${c.characterName}`)
             })
         }
     });
