@@ -136,9 +136,11 @@ Or just click one of the buttons PartyMan posts to chat when the sandbox spins u
 
 **Passive Check** — reads the party's passive Perception, Insight, or Investigation from their **D&D 2024 sheets** (via `getSheetItem` on the relevant `*_bonus`, plus the base 10). Uses PartyMan's `Party` class to find the party, so no token selection is needed — perfect for secretly checking whether anyone notices that ambush.
 
-Results are whispered to the GM as a styled card: a title bar for the check type, then one row per party member with their avatar, name, and score.
+Results are whispered to the GM as a styled card: a title bar for the check type, then one row per party member with their avatar, name, and score. Pass an optional DC to get a Success/Failure column per member (score ≥ DC succeeds); without a DC you get the raw scores.
 
-![Passive Check output](assets/pcheck-perception.png)
+![Passive Check output — raw scores](assets/pcheck-perception.png)
+
+![Passive Check output — with DC](assets/pcheck-insight-dc.png)
 
 > **Requires:** `partyman.js` must also be installed (it provides the `Party` / `PartyMember` classes).
 
@@ -149,24 +151,28 @@ Results are whispered to the GM as a styled card: a title bar for the check type
 | `!pcheck perception` | Whisper each party member's passive Perception to the GM |
 | `!pcheck insight` | Whisper each party member's passive Insight to the GM |
 | `!pcheck investigation` | Whisper each party member's passive Investigation to the GM |
+| `!pcheck <type> <dc>` | Same, plus Success/Failure per member vs the DC (e.g. `!pcheck insight 12`) |
 | `!pcheck help` | Show help text |
+
+An unparseable DC (e.g. `!pcheck insight potato`) whispers a warning and falls back to the raw-score card.
 
 ### Examples
 
 ```
 !pcheck perception
-!pcheck ?{Passive|perception|insight|investigation}
+!pcheck insight 12
 ```
 
 ### Suggested macros
 
 ```
-Passives: !pcheck ?{Check|perception|insight|investigation}
+Passives: !pcheck ?{Check Type|Perception, perception|Insight, insight|Investigation, investigation} ?{DC}
 ```
+
+Enter a number at the DC prompt for pass/fail; leaving it blank falls back to the raw-score card (possibly with an "Invalid DC" nudge, depending on how chat trims the blank).
 
 ### Planned / TODO
 
-- Optional DC argument returning pass/fail per member: `!pcheck insight 16`
 - Real (HTML) help text
 
 ---
