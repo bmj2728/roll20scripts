@@ -6,13 +6,12 @@ on('ready', async () => {
     let command = "!pm party"
     let commandName = "Display Party"
 
-    let htmlButton = `<a style="${ChatCards.THEME.button}" href="${command}">${commandName}</a>`;
+    let htmlButton = `<div style="text-align: center;"><a style="${ChatCards.THEME.button}" href="${command}">${commandName}</a></div>`;
 
-    sendChat('PartyMan', "PartyMan HTML:\n" + htmlButton)
+    const initCard = new ChatCards.Card("Party Man")
+    initCard.addRow(htmlButton)
+    initCard.send('PartyMan')
 
-    let markdownButton = `[${commandName}](${command})`
-
-    sendChat('PartyMan', "PartyMan MD:\n" + markdownButton)
 
     on('chat:message', async msg => {
         if (msg.type !== 'api' || !/^!pm\b/i.test(msg.content)) return;
