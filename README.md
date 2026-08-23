@@ -134,17 +134,21 @@ Or just click one of the buttons PartyMan posts to chat when the sandbox spins u
 
 ## passiveCheck.js — `!pcheck`
 
-**Passive Check** — reads the party's passive Perception, Insight, or Investigation from their **D&D 2024 sheets** (via `getSheetItem` on the relevant `*_bonus`, plus the base 10). Uses PartyMan's `getParty()` to find the party, so no token selection is needed — perfect for secretly checking whether anyone notices that ambush.
+**Passive Check** — reads the party's passive Perception, Insight, or Investigation from their **D&D 2024 sheets** (via `getSheetItem` on the relevant `*_bonus`, plus the base 10). Uses PartyMan's `Party` class to find the party, so no token selection is needed — perfect for secretly checking whether anyone notices that ambush.
 
-> **Requires:** `partyman.js` must also be installed (it provides `getParty()`).
+Results are whispered to the GM as a styled card: a title bar for the check type, then one row per party member with their avatar, name, and score.
+
+![Passive Check output](assets/pcheck-perception.png)
+
+> **Requires:** `partyman.js` must also be installed (it provides the `Party` / `PartyMember` classes).
 
 ### Usage
 
 | Command | Effect |
 |---|---|
-| `!pcheck perception` | Post each party member's passive Perception |
-| `!pcheck insight` | Post each party member's passive Insight |
-| `!pcheck investigation` | Post each party member's passive Investigation |
+| `!pcheck perception` | Whisper each party member's passive Perception to the GM |
+| `!pcheck insight` | Whisper each party member's passive Insight to the GM |
+| `!pcheck investigation` | Whisper each party member's passive Investigation to the GM |
 | `!pcheck help` | Show help text |
 
 ### Examples
