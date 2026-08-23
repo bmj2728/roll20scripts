@@ -48,7 +48,6 @@ class PartyMember {
     async syncDefaultToken() {
         return await getObj("character", this.id).get("_defaulttoken", (_defaulttoken) => {
             this.token = _defaulttoken
-            log(_defaulttoken)
         })
     }
 }
@@ -82,8 +81,7 @@ on('ready', async () => {
 
         if (cmd === 'party') {
             new Party().members.forEach(c => {
-                log(c)
-                sendChat('PartyMan', `Party Member: ${c.characterName}`)
+                sendChat('PartyMan', `Party Member:\n ${c.characterName}\n`)
             })
         }
     });
