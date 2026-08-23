@@ -2,7 +2,7 @@
 // !whimsy        -> prefix all selected tokens (no repeats, ever, until reset)
 // !whimsy reset  -> return all adjectives to the pool
 // !whimsy count  -> how many adjectives remain
-const ADJECTIVES = [
+const WHIMSY_ADJECTIVES = [
     'Abandoned','Able','Absolute','Adorable','Adventurous','Academic','Acceptable','Acclaimed',
     'Accomplished','Accurate','Aching','Acidic','Acrobatic','Active','Actual','Adept','Admirable',
     'Admired','Adolescent','Adored','Advanced','Afraid','Affectionate','Aged','Aggravating',
@@ -158,8 +158,8 @@ on('ready', () => {
             return;
         }
         if (arg === 'count') {
-            const left = ADJECTIVES.filter(a => !state.WhimsyName.used[a]).length;
-            sendChat('Whimsy', `/w gm ${left} of ${ADJECTIVES.length} adjectives remain.`);
+            const left = WHIMSY_ADJECTIVES.filter(a => !state.WhimsyName.used[a]).length;
+            sendChat('Whimsy', `/w gm ${left} of ${WHIMSY_ADJECTIVES.length} adjectives remain.`);
             return;
         }
 
@@ -173,7 +173,7 @@ on('ready', () => {
             .map(s => getObj('graphic', s._id))
             .filter(t => t !== undefined)
             .forEach(t => {
-                const pool = ADJECTIVES.filter(a => !state.WhimsyName.used[a]);
+                const pool = WHIMSY_ADJECTIVES.filter(a => !state.WhimsyName.used[a]);
                 if (!pool.length) {
                     sendChat('Whimsy', '/w gm The Corpus is exhausted. !whimsy reset to replenish.');
                     return;
