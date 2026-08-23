@@ -47,7 +47,7 @@ class PartyMember {
 
     async syncDefaultToken() {
         return await getObj("character", this.id).get("_defaulttoken", (_defaulttoken) => {
-            this.token = _defaulttoken
+            this.defaultToken = _defaulttoken
         })
     }
 }

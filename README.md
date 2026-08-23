@@ -95,11 +95,22 @@ SetHP:   !hp ?{New HP}
 
 ## partyman.js — `!pm`
 
-**PartyMan** — party membership utilities. Originally planned as a pile of heuristics to identify party members, but the character object now carries an `inParty` flag, so it simply queries that. Right now it's mostly the home of the `getParty()` helper, which other scripts (like Passive Check) build on:
+**PartyMan** — party membership utilities. Originally planned as a pile of heuristics to identify party members, but the character object now carries an `inParty` flag, so it simply queries that. It provides the party data layer that other scripts (like Passive Check) build on.
+
+### Provided helpers & classes
+
+| Export | What it does |
+|---|---|
+| `getParty()` | Returns the raw character objects flagged `inParty: true` |
+| `getPartyMembers()` | Wraps each party character in a `PartyMember` |
+| `Party` | Constructs the member list and kicks off a default-token sync for each member |
+| `PartyMember` | Snapshot of one party character: `id`, `characterName`, `characterSheet`, `controlledBy`, `avatar`, plus `syncDefaultToken()` to load the character's default token blob (an async getter, since `_defaulttoken` is only available via callback) |
 
 ```js
 const getParty = () => findObjs({ _type: "character", inParty: true });
 ```
+
+The file also carries a reference dump of a party character object (as seen by the D&D 2024 sheet), handy for remembering which fields exist — including the `inParty` flag and the internal `_roll20_internal_party_tag_` tag.
 
 On sandbox start it also posts example HTML- and Markdown-styled chat buttons that run `!pm party`.
 
@@ -107,7 +118,7 @@ On sandbox start it also posts example HTML- and Markdown-styled chat buttons th
 
 | Command | Effect |
 |---|---|
-| `!pm party` | List the current party members in chat |
+| `!pm party` | Build a `Party` and list its members in chat |
 
 No token selection required — membership comes from the characters' `inParty` flag.
 
@@ -121,7 +132,7 @@ Or just click one of the buttons PartyMan posts to chat when the sandbox spins u
 
 ---
 
-## passiveWisdom.js — `!pcheck`
+## passiveCheck.js — `!pcheck`
 
 **Passive Check** — reads the party's passive Perception, Insight, or Investigation from their **D&D 2024 sheets** (via `getSheetItem` on the relevant `*_bonus`, plus the base 10). Uses PartyMan's `getParty()` to find the party, so no token selection is needed — perfect for secretly checking whether anyone notices that ambush.
 
