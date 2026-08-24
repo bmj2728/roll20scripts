@@ -16,7 +16,7 @@ A collection of Roll20 API (Mod) scripts for game management. Paste the contents
 | [statRoller.js](#statrollerjs--rollstats) | `!rollstats` | `chatCards.js` |
 | [whimsy.js](#whimsyjs--whimsy) | `!whimsy` | — |
 
-Roll20 evaluates every script into one shared sandbox namespace, so the shared code is organized into IIFE namespaces (`ChatCards`, `PartyMan`, `PassiveCheck`) that each expose a single global and keep their helpers private. Cross-namespace references happen inside function bodies, at call time — so **script load order does not matter**.
+Roll20 evaluates every script into one shared sandbox namespace, so the shared code is organized into IIFE namespaces (`ChatCards`, `PartyMan`, `PassiveCheck`, `StatRoller`) that each expose a single global and keep their helpers private. Cross-namespace references happen inside function bodies, at call time — so **script load order does not matter**.
 
 ---
 
@@ -54,6 +54,7 @@ Scripts building on ChatCards should speak in THEME keys rather than literal sty
 | `ChatCards.Card.num(value)` | *(static)* Wraps a value as a right-aligned bold cell |
 | `ChatCards.Card.span(content, span, [style])` | *(static)* Wraps content as a cell spanning `span` columns — for full-width rows inside a wider table |
 | `ChatCards.Card.tiles(tiles, [theme])` | *(static)* Renders a strip of stat tiles: `[{label, value, sub?}]`, label over value over optional sub-line, equal widths |
+| `ChatCards.Card.button(label, command, [theme])` | *(static)* Renders an API command button, entity-escaping `,` `\|` `}` so roll queries like `?{Attempts\|3}` survive the chat parser and prompt on click |
 | `.render()` | Returns the card's HTML |
 | `.whisperGM([from])` | Whispers the rendered card to the GM |
 | `.send([from])` | Sends the rendered card to public chat |
@@ -205,14 +206,14 @@ for (const member of PartyMan.getMembers()) {
 card.whisperGM("Passive Check")
 ```
 
-On sandbox start PartyMan syncs the party once and caches it, so `!pm party` responds instantly; `!pm refresh` re-syncs after the roster or sheets change.
+On sandbox start PartyMan syncs the party once and caches it, so `!pm party` responds instantly. A debounced `change:character` listener keeps the cache self-healing for membership flips and edits to current members (renames, avatars). The blind spot is sheet data: Beacon sheet-item writes (ability scores, a magic belt) fire no sandbox event, so `!pm refresh` remains the escape hatch after stat changes.
 
 ### Usage
 
 | Command | Effect |
 |---|---|
 | `!pm party` | Post the Party Roster card (from the startup cache) |
-| `!pm refresh` | Re-sync the cached party — run after adding/removing members or editing ability scores |
+| `!pm refresh` | Force a re-sync — needed after sheet edits (ability scores), which fire no event the cache can hear |
 
 No token selection required — membership comes from the characters' `inParty` flag. On sandbox start PartyMan also posts a Party Man card with a Display Party button.
 
@@ -306,7 +307,9 @@ The type guard, the help card, and the sheet read all come from that one list, s
 
 ## statRoller.js — `!rollstats`
 
-Rolls a full set of six ability scores using the classic **4d6 drop lowest** method and posts the results as a ChatCards tile strip, attributed to whoever ran the command — the same look as the Party Roster's ability tiles, so a fresh array reads like a character sheet from the moment it's rolled.
+Rolls ability-score arrays using the classic **4d6 drop lowest** method and posts each one as a ChatCards tile strip — the same look as the Party Roster's ability tiles, so a fresh array reads like a character sheet from the moment it's rolled. Every array is stored in persistent `state` per player, which powers attempt limits, history, and a GM config menu.
+
+![StatRoller array card](assets/sr-array.png)
 
 > **Requires:** `chatCards.js`.
 
@@ -314,17 +317,35 @@ Rolls a full set of six ability scores using the classic **4d6 drop lowest** met
 
 | Command | Effect |
 |---|---|
-| `!rollstats` | Roll 6 ability scores (4d6 drop lowest each) and post them |
+| `!rollstats` | Roll one array (counts against the attempt limit) |
+| `!rollstats <n>` | Roll `n` arrays, one card each, clamped to attempts remaining |
+| `!rollstats history` | Whisper your stored arrays back to you |
 
-No token selection required. Each tile shows the stat's total over the four dice rolled (the dropped low die struck through), with the grand total of all six scores on a footer row — handy for comparing arrays at session zero.
+Each card's title carries an attempt stamp — `Alice — Ability Scores (2/3)` — so every posted array shows which attempt it was; that plus the struck-through dropped die is the accountability layer. When a request exceeds the attempts left, the script rolls what it can and whispers why (`Rolled 1 of the 5 requested`). At the limit, further rolls are refused with the count. Default limit is 3; `0` means unlimited (no stamps).
+
+### GM commands
+
+| Command | Effect |
+|---|---|
+| `!rollstats menu` | Whispered config card: current limit with a Set button, then one row per player with rolls — attempts used, History and Clear buttons |
+| `!rollstats limit <n>` | Set the attempt limit (0 = unlimited) |
+| `!rollstats history <playerid>` | Whisper any player's stored arrays to you |
+| `!rollstats clear <playerid>` | Rebirth — wipe that player's count **and** history |
+| `!rollstats clearall` | Wipe everyone; the new-campaign button |
+
+![StatRoller config menu](assets/sr-menu.png)
+
+All GM commands are guarded with `playerIsGM(playerid)` — never the "(GM)" name suffix, which any player can fake by renaming. Players are likewise keyed by `playerid` (stable) rather than display name, with the display name stored alongside purely for the menu. The menu's History/Clear buttons carry the playerid for you, so nobody ever types one.
 
 ### Suggested macros
 
 ```
-RollStats: !rollstats
+RollStats:  !rollstats
+RollStats3: !rollstats 3
+StatConfig: !rollstats menu
 ```
 
-Make it visible to all players so everyone rolls in the open.
+Make `RollStats` visible to all players so everyone rolls in the open — the attempt stamps do the rest.
 
 ---
 
@@ -390,6 +411,8 @@ A few habits that keep these playing nicely in Roll20's shared sandbox:
 - **One global per script.** Shared code is wrapped in an IIFE that returns a namespace object (`ChatCards`, `PartyMan`, `PassiveCheck`); helpers that aren't part of the public surface stay private. Bare constants that must live at top level get a script prefix instead (`WHIMSY_ADJECTIVES`, `PASSIVES_HELP_TEXT`).
 - **Styling is data.** Card styles live in `ChatCards.THEME`, not in the functions that build the markup — including semantic keys (`good`/`bad`) so meaning and color stay decoupled.
 - **Reference across namespaces at call time**, never at evaluation time — that's what keeps load order irrelevant.
+- **Identity is playerid, not display name.** Display names change and the "(GM)" suffix is spoofable; `msg.playerid` and `playerIsGM(playerid)` are the stable truth. Store the display name only for showing to humans.
 - **Whisper by audience.** Results the GM shouldn't share go to the GM; help and error text goes back to the person who typed the command.
+- **Beacon sheet-item writes are silent.** Field-tested: editing sheet data (even via effects like a strength-setting belt) fires neither `change:attribute` nor `change:character`. Membership and character-object changes do fire `change:character`. Any cache of sheet data therefore needs an explicit refresh command; caches of membership can self-heal with a listener.
 - **Layout with tables, not flex.** Roll20's chat sanitizer strips `display:flex`; inner tables with `table-layout:fixed` are what actually survive, at every chat width.
 - **Fetch only what the command needs.** Passive Check builds its member list with `getMembers()` rather than `new Party()`, skipping default-token fetches it would never use.

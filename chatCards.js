@@ -24,9 +24,9 @@ const ChatCards = (() => {
     const THEME = {
         card:       "border:1px solid #444;border-radius:6px;overflow:hidden;font-size:12px;",
         header:     "background:#2b2b3a;color:#fff;padding:4px 8px;font-weight:bold;",
-        table:      "width:100%;border-collapse:collapse;",
-        cell:       "padding:2px 6px;",
-        cellNum:    "padding:2px 6px;text-align:right;font-weight:bold;",
+        table:      "width:100%;border-collapse:collapse;margin-bottom:4px;",
+        cell:       "padding:3px 8px;",
+        cellNum:    "padding:3px 8px;text-align:right;font-weight:bold;",
         avatarCell: "width:28px;padding:2px;",
         avatar:     "width:24px;height:24px;border-radius:4px;",
         avatarCellLg: "width:40px;padding:3px;",
@@ -37,7 +37,7 @@ const ChatCards = (() => {
         // Semantic verdict cells: pass/fail, up/down, gain/loss
         good:       "padding:2px 6px;color:#46a758;font-weight:bold;",
         bad:        "padding:2px 6px;color:#e5484d;font-weight:bold;",
-        button:     "background-color:#7e22ce;color:white;padding:5px 10px;border-radius:4px;text-decoration:none;font-weight:bold;",
+        button:     "display:inline-block;margin:3px 0;background-color:#7e22ce;color:white;padding:5px 10px;border-radius:4px;border:1px solid rgba(255,255,255,0.25);text-decoration:none;font-weight:bold;",
         // Stat tiles: a strip of small labeled values (ability scores, saves, coin).
         // Laid out as an inner table, NOT flex — Roll20's chat sanitizer strips
         // display:flex, which collapses flex tiles into full-width stacked rows.
@@ -139,6 +139,30 @@ const ChatCards = (() => {
                 `</td>`
             ).join("")
             return `<table style="${theme.tileRow}"><tr>${tds}</tr></table>`
+        }
+
+        /**
+         * Renders an API command button styled via THEME.button. The command is
+         * entity-escaped so roll queries survive the chat parser at send time
+         * and only prompt when the button is clicked:
+         *
+         *     ChatCards.Card.button('Set limit', '!rollstats limit ?{Attempts|3}')
+         *
+         * Escapes `,` `|` `}` — the characters the parser would otherwise eat
+         * inside a `?{...}` query. The browser decodes the entities on render,
+         * so the clicked command reaches chat intact.
+         *
+         * @param {string} label - Visible button text.
+         * @param {string} command - The API command to send on click.
+         * @param {Object} [theme=THEME]
+         * @returns {string} HTML for the button.
+         */
+        static button(label, command, theme = THEME) {
+            const safe = command
+                .replace(/,/g, '&#44;')
+                .replace(/\|/g, '&#124;')
+                .replace(/\}/g, '&#125;')
+            return `<a style="${theme.button}" href="${safe}">${label}</a>`
         }
 
         /**

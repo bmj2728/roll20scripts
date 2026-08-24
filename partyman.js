@@ -5,10 +5,7 @@ on('ready', async () => {
 
     let pmParty = await new PartyMan.Party().syncParty()
 
-    let command = "!pm party"
-    let commandName = "Display Party"
-
-    let htmlButton = `<div style="text-align: center;"><a style="${ChatCards.THEME.button}" href="${command}">${commandName}</a></div>`;
+    let htmlButton = `<div style="text-align: center;">${ChatCards.Card.button("Display Party", "!pm party")}</div>`;
 
     const initCard = new ChatCards.Card("Party Man")
     initCard.addRow(htmlButton)
