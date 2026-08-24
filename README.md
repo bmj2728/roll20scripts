@@ -337,6 +337,7 @@ Adjectives are never repeated while in play: each one in use is held out of the 
 | Command | Effect |
 |---|---|
 | `!whimsy` | Prefix each selected token with a unique adjective (or reroll it) |
+| `!whimsy sheet` | Explicit synonym for the default — exists for macros, since Roll20 roll queries can't reliably produce an empty dropdown value |
 | `!whimsy token` | Same, but base the name on the token's nameplate instead of the sheet |
 | `!whimsy reset` | Return all adjectives to the pool |
 | `!whimsy count` | Whisper to the GM how many adjectives remain |
@@ -362,12 +363,12 @@ Don't like what the dice gave your boss goblin? Select just that token and run i
 ### Suggested macros
 
 ```
-Whimsy:      !whimsy ?{Name from|Sheet,|Token,token}
+Whimsy:      !whimsy ?{Name from|Sheet,sheet|Token,token}
 WhimsyReset: !whimsy reset
 WhimsyCount: !whimsy count
 ```
 
-`Whimsy` works well as a token action so you can name mobs the moment you place them — the prompt collapses to the normal sheet path unless you pick Token.
+`Whimsy` works well as a token action so you can name mobs the moment you place them. (Both dropdown options carry explicit values — an empty value like `Sheet,` doesn't substitute reliably in Roll20 roll queries, which is why `sheet` exists as a command.)
 
 ---
 

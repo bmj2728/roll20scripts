@@ -1,8 +1,10 @@
 // WhimsyName - unique random adjective prefixes from The Corpus
 // !whimsy        -> prefix all selected tokens (no repeats until reset; rerolling
 //                   a token swaps its adjective and returns the old one to the pool)
+// !whimsy sheet  -> explicit synonym for the default (exists because Roll20 roll
+//                   queries can't reliably produce an empty dropdown value)
 // !whimsy token  -> same, but base the name on the token's nameplate instead of
-//                   the represented character's sheet name
+//                   the represented character's sheet name/stat block
 // !whimsy reset  -> return all adjectives to the pool
 // !whimsy count  -> how many adjectives remain
 //
@@ -184,8 +186,8 @@ on('ready', () => {
             sendChat('Whimsy', `/w gm ${left} of ${WHIMSY_ADJECTIVES.length} adjectives remain.`);
             return;
         }
-        if (arg !== '' && arg !== 'token') {
-            sendChat('Whimsy', '/w gm Usage: !whimsy [token|reset|count]');
+        if (arg !== '' && arg !== 'sheet' && arg !== 'token') {
+            sendChat('Whimsy', '/w gm Usage: !whimsy [sheet|token|reset|count]');
             return;
         }
         const useTokenName = arg === 'token';
