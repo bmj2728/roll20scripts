@@ -29,8 +29,23 @@ const ChatCards = (() => {
         cellNum:    "padding:2px 6px;text-align:right;font-weight:bold;",
         avatarCell: "width:28px;padding:2px;",
         avatar:     "width:24px;height:24px;border-radius:4px;",
+        avatarCellLg: "width:40px;padding:3px;",
+        avatarLg:   "width:34px;height:34px;border-radius:5px;",
+        name:       "padding:2px 6px;",
+        nameLg:     "padding:4px 6px;font-size:14px;font-weight:bold;",
         muted:      "color:#aaa;",
-        button:     "background-color:#7e22ce;color:white;padding:5px 10px;border-radius:4px;text-decoration:none;font-weight:bold;"
+        // Semantic verdict cells: pass/fail, up/down, gain/loss
+        good:       "padding:2px 6px;color:#46a758;font-weight:bold;",
+        bad:        "padding:2px 6px;color:#e5484d;font-weight:bold;",
+        button:     "background-color:#7e22ce;color:white;padding:5px 10px;border-radius:4px;text-decoration:none;font-weight:bold;",
+        // Stat tiles: a strip of small labeled values (ability scores, saves, coin).
+        // Laid out as an inner table, NOT flex — Roll20's chat sanitizer strips
+        // display:flex, which collapses flex tiles into full-width stacked rows.
+        tileRow:    "width:100%;table-layout:fixed;border-collapse:separate;border-spacing:3px 2px;",
+        tile:       "text-align:center;background:rgba(128,128,128,0.12);border:1px solid rgba(128,128,128,0.25);border-radius:4px;padding:3px 2px;",
+        tileLabel:  "font-size:9px;letter-spacing:0.5px;color:#999;text-transform:uppercase;",
+        tileValue:  "font-size:14px;font-weight:bold;line-height:1.2;",
+        tileMod:    "font-size:10px;color:#999;"
     }
 
     /*
@@ -87,6 +102,46 @@ const ChatCards = (() => {
         }
 
         /**
+         * Wraps content as a cell spanning multiple columns. Use for full-width
+         * rows (a tile strip, a note) inside a table whose other rows have
+         * more cells — mismatched column counts misalign the table otherwise.
+         *
+         * @param {*} content
+         * @param {number} span - Number of columns to span.
+         * @param {string} [style] - THEME key or raw CSS; defaults to THEME.cell.
+         * @returns {{content: *, style: string, span: number}}
+         */
+        static span(content, span, style) {
+            return { content, style, span }
+        }
+
+        /**
+         * Renders a strip of stat tiles — small labeled values with an optional
+         * sub-line (label over value over sub), sharing the row evenly. Wrap it
+         * with Card.span to sit under a wider row:
+         *
+         *     card.addRow(ChatCards.Card.span(ChatCards.Card.tiles(stats), 2))
+         *
+         * Rendered as an inner single-row table rather than flexbox: Roll20's
+         * chat sanitizer strips display:flex, which would stack the tiles
+         * full-width. table-layout:fixed keeps the cells equal-width.
+         *
+         * @param {Array<{label: string, value: *, sub: *=}>} tiles
+         * @param {Object} [theme=THEME]
+         * @returns {string} HTML for the tile strip.
+         */
+        static tiles(tiles, theme = THEME) {
+            const tds = tiles.map(t =>
+                `<td style="${theme.tile}">` +
+                `<div style="${theme.tileLabel}">${t.label}</div>` +
+                `<div style="${theme.tileValue}">${t.value}</div>` +
+                (t.sub !== undefined ? `<div style="${theme.tileMod}">${t.sub}</div>` : ``) +
+                `</td>`
+            ).join("")
+            return `<table style="${theme.tileRow}"><tr>${tds}</tr></table>`
+        }
+
+        /**
          * Resolves a cell's style: undefined -> THEME.cell, a THEME key -> that
          * entry, anything else is treated as raw CSS.
          */
@@ -106,7 +161,8 @@ const ChatCards = (() => {
                     const isObj = cell !== null && typeof cell === "object"
                     const content = isObj ? cell.content : cell
                     const style = this.resolveCellStyle(isObj ? cell.style : undefined)
-                    return `<td style="${style}">${content}</td>`
+                    const span = (isObj && cell.span > 1) ? ` colspan="${cell.span}"` : ``
+                    return `<td${span} style="${style}">${content}</td>`
                 }).join("")
                 return `<tr>${tds}</tr>`
             }).join("")

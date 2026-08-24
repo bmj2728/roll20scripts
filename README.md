@@ -35,10 +35,13 @@ Keeping the styling in one theme object means every tool built on it stays visua
 | `table` | The row table |
 | `cell` | A default cell |
 | `cellNum` | A right-aligned bold cell (scores, totals) |
-| `avatarCell` | The narrow cell holding an avatar |
-| `avatar` | The avatar `<img>` itself |
+| `avatarCell` / `avatar` | The narrow avatar cell and the `<img>` in it (small, for data rows) |
+| `avatarCellLg` / `avatarLg` | Larger avatar variant, for rows acting as section headers |
+| `name` / `nameLg` | Name cell in the matching sizes (`nameLg` is bigger and bold) |
+| `good` / `bad` | Semantic verdict cells — green/red bold (pass/fail, gain/loss) |
 | `muted` | De-emphasized footnote text |
 | `button` | Chat buttons (`<a>` styled as a button) |
+| `tileRow`, `tile`, `tileLabel`, `tileValue`, `tileMod` | The stat-tile strip (see `Card.tiles`) |
 
 Scripts building on ChatCards should speak in THEME keys rather than literal style strings.
 
@@ -49,11 +52,13 @@ Scripts building on ChatCards should speak in THEME keys rather than literal sty
 | `new ChatCards.Card(title, [theme])` | Starts a card; pass a theme object to override the shared `THEME` |
 | `.addRow(...cells)` | Appends a row — chainable |
 | `ChatCards.Card.num(value)` | *(static)* Wraps a value as a right-aligned bold cell |
+| `ChatCards.Card.span(content, span, [style])` | *(static)* Wraps content as a cell spanning `span` columns — for full-width rows inside a wider table |
+| `ChatCards.Card.tiles(tiles, [theme])` | *(static)* Renders a strip of stat tiles: `[{label, value, sub?}]`, label over value over optional sub-line, equal widths |
 | `.render()` | Returns the card's HTML |
 | `.whisperGM([from])` | Whispers the rendered card to the GM |
 | `.send([from])` | Sends the rendered card to public chat |
 
-A cell is either a plain value (rendered with `THEME.cell`) or an object `{ content, style }`, where `style` is a THEME key such as `'cellNum'` or a raw CSS string.
+A cell is either a plain value (rendered with `THEME.cell`) or an object `{ content, style, span? }`, where `style` is a THEME key such as `'cellNum'` or a raw CSS string.
 
 ### Example
 
@@ -64,11 +69,23 @@ card.addRow("Ohi Saiweau", ChatCards.Card.num("120 gp"))
 card.whisperGM("PartyFund")
 ```
 
+A tile strip under a two-column row (this is how the Party Roster draws ability scores):
+
+```js
+card.addRow(ChatCards.Card.span(ChatCards.Card.tiles([
+    { label: "STR", value: 16, sub: "+3" },
+    { label: "DEX", value: 13, sub: "+1" },
+    // ...
+]), 2))
+```
+
+> **Roll20 rendering note:** the tile strip is an inner `<table>`, not flexbox — Roll20's chat sanitizer strips `display:flex`, which collapses flex tiles into stacked full-width rows. Table cells survive the sanitizer, and `table-layout:fixed` keeps them equal-width all the way down to the narrowest chat pane. Keep this in mind for any custom layout you build on ChatCards.
+
 ---
 
 ## conditions.js — `!cond`
 
-A CondSync-safe condition handler that adds or removes status markers on selected tokens without clobbering markers set by other means.
+A condition handler that adds or removes status markers on selected tokens without clobbering markers set by other means.
 
 ### Usage
 
@@ -159,6 +176,10 @@ SetHP:   !hp ?{New HP}
 
 **PartyMan** — the party data layer. Originally planned as a pile of heuristics to identify party members, but the character object now carries an `inParty` flag, so it simply queries that. Other scripts (Passive Check, and anything else party-shaped) build on it.
 
+The flagship view is the Party Roster: each member as a header row (large avatar + name) over a strip of ability-score tiles, character-sheet style.
+
+![Party Roster card](assets/pm-roster.png)
+
 > **Requires:** `chatCards.js`.
 
 ### `PartyMan` namespace
@@ -166,38 +187,43 @@ SetHP:   !hp ?{New HP}
 | Member | What it does |
 |---|---|
 | `getParty()` | Returns the raw character objects flagged `inParty: true` |
-| `getMembers()` | Wraps each party character in a `Member` |
-| `Member` | Snapshot of one party character: `id`, `characterName`, `characterSheet`, `controlledBy`, `avatar`, `defaultToken`, plus `syncDefaultToken()` |
-| `Party` | Builds the member list and kicks off a default-token sync for each member |
-| `memberCells(member)` | Returns the avatar + name cells for a `ChatCards.Card` row |
+| `getMembers()` | Wraps each party character in a `Member` — the cheap path when you don't need token or score syncs |
+| `Member` | Snapshot of one party character: `id`, `characterName`, `characterSheet`, `controlledBy`, `avatar`, `defaultToken`, `abilityScores`, plus `syncDefaultToken()` and `syncAbilityScores()` |
+| `MemberAbilityScores` | One member's six scores; `syncScores()` loads them from the sheet concurrently, `getAbilityMod()` / `getAbilityModText()` derive modifiers, `abilityScoreCells(span)` renders the tile strip |
+| `Party` | Builds the member list and kicks off a default-token sync for each member; `syncParty()` refreshes the list and loads every member's scores (concurrently across the whole party) |
+| `memberCells(member, [size])` | Returns the avatar + name cells for a `ChatCards.Card` row — `'sm'` (default) for dense data rows, `'lg'` for section-header rows like the roster |
 
-`Member.syncDefaultToken()` returns a Promise, since Roll20 only exposes `_defaulttoken` through a callback.
+`Member.syncDefaultToken()` returns a Promise, since Roll20 only exposes `_defaulttoken` through a callback. Sync methods await their sheet reads properly, so `await party.syncParty()` guarantees populated scores afterwards.
 
 `memberCells` is the seam between the party data and the card renderer: spread it into a row, then append whatever the calling script needs.
 
 ```js
 const card = new ChatCards.Card("Passive Check — Insight")
-for (const member of new PartyMan.Party().members) {
+for (const member of PartyMan.getMembers()) {
     card.addRow(...PartyMan.memberCells(member), ChatCards.Card.num(score))
 }
 card.whisperGM("Passive Check")
 ```
 
+On sandbox start PartyMan syncs the party once and caches it, so `!pm party` responds instantly; `!pm refresh` re-syncs after the roster or sheets change.
+
 ### Usage
 
 | Command | Effect |
 |---|---|
-| `!pm party` | Post a Party Roster card of the current party |
+| `!pm party` | Post the Party Roster card (from the startup cache) |
+| `!pm refresh` | Re-sync the cached party — run after adding/removing members or editing ability scores |
 
-No token selection required — membership comes from the characters' `inParty` flag. On sandbox start PartyMan also posts example HTML- and Markdown-styled chat buttons that run `!pm party`.
+No token selection required — membership comes from the characters' `inParty` flag. On sandbox start PartyMan also posts a Party Man card with a Display Party button.
 
 ### Suggested macros
 
 ```
-Party: !pm party
+Party:        !pm party
+PartyRefresh: !pm refresh
 ```
 
-Or just click one of the buttons PartyMan posts to chat when the sandbox spins up.
+Or just click the button PartyMan posts to chat when the sandbox spins up.
 
 ---
 
@@ -205,11 +231,11 @@ Or just click one of the buttons PartyMan posts to chat when the sandbox spins u
 
 **Passive Check** — reads the party's passive score for **any of the 18 skills** from their **D&D 2024 sheets** (the sheet's `<skill>_bonus` attribute plus a base 10) and whispers the results to the GM as a card. No token selection needed — the party comes from PartyMan — so it's ideal for quietly checking whether anyone notices the ambush, or for a group passive Stealth against the guards' passive Perception.
 
-Pass an optional DC to get a Success/Failure column per member (score ≥ DC succeeds); without a DC you get the raw scores.
+Pass an optional DC to get a Success/Failure verdict per member (score ≥ DC succeeds), colored green/red via the ChatCards `good`/`bad` theme keys — color for the glance, word for certainty. Without a DC you get the raw scores.
 
 ![Passive Check output — raw scores](assets/pcheck-perception.png)
 
-![Passive Check output — with DC](assets/pcheck-insight-dc.png)
+![Passive Check output — with DC](assets/pcheck-dc.png)
 
 > **Requires:** `chatCards.js` and `partyman.js`.
 
@@ -349,7 +375,9 @@ Tab order doesn't matter: everything runs inside `on('ready')` or resolves its d
 
 A few habits that keep these playing nicely in Roll20's shared sandbox:
 
-- **One global per script.** Shared code is wrapped in an IIFE that returns a namespace object (`ChatCards`, `PartyMan`, `PassiveCheck`); helpers that aren't part of the public surface stay private.
-- **Styling is data.** Card styles live in `ChatCards.THEME`, not in the functions that build the markup.
+- **One global per script.** Shared code is wrapped in an IIFE that returns a namespace object (`ChatCards`, `PartyMan`, `PassiveCheck`); helpers that aren't part of the public surface stay private. Bare constants that must live at top level get a script prefix instead (`WHIMSY_ADJECTIVES`, `PASSIVES_HELP_TEXT`).
+- **Styling is data.** Card styles live in `ChatCards.THEME`, not in the functions that build the markup — including semantic keys (`good`/`bad`) so meaning and color stay decoupled.
 - **Reference across namespaces at call time**, never at evaluation time — that's what keeps load order irrelevant.
 - **Whisper by audience.** Results the GM shouldn't share go to the GM; help and error text goes back to the person who typed the command.
+- **Layout with tables, not flex.** Roll20's chat sanitizer strips `display:flex`; inner tables with `table-layout:fixed` are what actually survive, at every chat width.
+- **Fetch only what the command needs.** Passive Check builds its member list with `getMembers()` rather than `new Party()`, skipping default-token fetches it would never use.

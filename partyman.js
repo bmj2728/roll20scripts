@@ -3,6 +3,8 @@
 on('ready', async () => {
     log("Starting PartyMan")
 
+    let pmParty = await new PartyMan.Party().syncParty()
+
     let command = "!pm party"
     let commandName = "Display Party"
 
@@ -24,10 +26,15 @@ on('ready', async () => {
 
         if (cmd === 'party') {
             const card = new ChatCards.Card("Party Roster")
-            for (const member of new PartyMan.Party().members) {
-                card.addRow(...PartyMan.memberCells(member))
+            for (const member of pmParty.members) {
+                card.addRow(...PartyMan.memberCells(member, 'lg'))
+                card.addRow(member.abilityScores.abilityScoreCells(2))
             }
             card.send('PartyMan')
+        }
+
+        if (cmd === 'refresh') {
+            pmParty = await new PartyMan.Party().syncParty()
         }
     });
 });
@@ -78,6 +85,78 @@ const PartyMan = (() => {
         return getParty().map(char => new Member(char))
     }
 
+    class MemberAbilityScores {
+        constructor(charId) {
+            this.member = charId
+            this.str = 0
+            this.dex = 0
+            this.con = 0
+            this.int = 0
+            this.wis = 0
+            this.cha = 0
+        }
+
+        /**
+         * Loads all six scores from the sheet concurrently. Awaiting Promise.all
+         * (rather than firing a .then and returning) means callers that await
+         * this are guaranteed the scores are populated afterwards.
+         *
+         * @returns {Promise<MemberAbilityScores>} this, once populated.
+         */
+        async syncScores() {
+            const [str, dex, con, int, wis, cha] = await Promise.all([
+                getSheetItem(this.member, "strength"),
+                getSheetItem(this.member, "dexterity"),
+                getSheetItem(this.member, "constitution"),
+                getSheetItem(this.member, "intelligence"),
+                getSheetItem(this.member, "wisdom"),
+                getSheetItem(this.member, "charisma")
+            ])
+            this.str = str
+            this.dex = dex
+            this.con = con
+            this.int = int
+            this.wis = wis
+            this.cha = cha
+            return this
+        };
+
+        getAbilityMod(ability) {
+            return Math.floor((this[ability] - 10) / 2)
+        }
+
+        /**
+         * The modifier as sheet-style text: '+2', '-1', '+0'.
+         *
+         * @param {string} ability - 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+         * @returns {string}
+         */
+        getAbilityModText(ability) {
+            const mod = this.getAbilityMod(ability)
+            return mod >= 0 ? `+${mod}` : `${mod}`
+        }
+
+        /**
+         * The six scores as a ChatCards tile strip: abbreviation over score
+         * over modifier, character-sheet style. Returns one full-width cell —
+         * pass the column count of the card's widest row so it spans cleanly:
+         *
+         *     card.addRow(member.abilityScores.abilityScoreCells(2))
+         *
+         * @param {number} [span=2] - Columns the strip should span.
+         * @returns {{content: string, style: string, span: number}}
+         */
+        abilityScoreCells(span = 2) {
+            const tiles = ['str', 'dex', 'con', 'int', 'wis', 'cha'].map(a => ({
+                label: a.toUpperCase(),
+                value: this[a],
+                sub: this.getAbilityModText(a)
+            }))
+            return ChatCards.Card.span(ChatCards.Card.tiles(tiles), span, "padding:0;")
+        }
+
+    }
+
     /**
      * Represents a party member, holding information about their character sheet, name,
      * controlling player, avatar, and associated token data.
@@ -90,6 +169,8 @@ const PartyMan = (() => {
             this.controlledBy = char.get("controlledby")
             this.avatar = char.get("avatar")
             this.defaultToken = {}
+            this.abilityScores = new MemberAbilityScores(this.id)
+
         }
 
         /**
@@ -106,6 +187,12 @@ const PartyMan = (() => {
                 })
             })
         }
+
+        async syncAbilityScores() {
+            await this.abilityScores.syncScores()
+        }
+
+
     }
 
     /**
@@ -122,6 +209,18 @@ const PartyMan = (() => {
                 member.syncDefaultToken()
             }
         }
+
+        /**
+         * Refreshes the member list and loads every member's scores
+         * concurrently (one await for the whole party, not one per member).
+         *
+         * @returns {Promise<Party>} this, once every member is populated.
+         */
+        async syncParty() {
+            this.members = getMembers()
+            await Promise.all(this.members.map(member => member.abilityScores.syncScores()))
+            return this
+        }
     }
 
     /*
@@ -136,20 +235,29 @@ const PartyMan = (() => {
      *
      *     card.addRow(...PartyMan.memberCells(pm), ChatCards.Card.num(score))
      *
+     * Two sizes: 'sm' (default) for dense data rows where the member is one of
+     * many lines (Passive Check), 'lg' for rows acting as a section header
+     * (the roster, where stat tiles sit underneath).
+     *
      * References ChatCards only at call time, so script load order never matters.
      *
      * @param {Member} member
-     * @returns {Array<string|{content: string, style: string}>} Cells for ChatCards.Card.addRow.
+     * @param {string} [size='sm'] - 'sm' | 'lg'
+     * @returns {Array<{content: string, style: string}>} Cells for ChatCards.Card.addRow.
      */
-    const memberCells = (member) => {
+    const memberCells = (member, size = 'sm') => {
+        const lg = size === 'lg'
         return [
             {
-                content: `<img src="${member.avatar}" style="${ChatCards.THEME.avatar}" alt="${member.characterName}">`,
-                style: "avatarCell"
+                content: `<img src="${member.avatar}" style="${lg ? ChatCards.THEME.avatarLg : ChatCards.THEME.avatar}" alt="${member.characterName}">`,
+                style: lg ? "avatarCellLg" : "avatarCell"
             },
-            member.characterName
+            {
+                content: member.characterName,
+                style: lg ? "nameLg" : "name"
+            }
         ]
     }
 
-    return { getParty, getMembers, Member, Party, memberCells }
+    return { getParty, getMembers, Member, Party, memberCells, MemberAbilityScores }
 })()

@@ -34,15 +34,17 @@ on('ready', () => {
             return;
         }
 
-        let party = new PartyMan.Party()
+        // getMembers, not new Party(): passive checks never touch default
+        // tokens, so skip the per-member token fetches Party kicks off.
+        const members = PartyMan.getMembers()
         //party guard
-        if (party.members.length < 1) {
+        if (members.length < 1) {
             whisperBack("Party not found")
             return;
         }
 
         if (dc === undefined) {
-            const card = await PassiveCheck.buildCard(party, checkType)
+            const card = await PassiveCheck.buildCard(members, checkType)
             card.whisperGM("Passive Check")
             return
         }
@@ -50,12 +52,12 @@ on('ready', () => {
         const parsedDC = parseInt(dc)
         if (isNaN(parsedDC)) {
             whisperBack(`Invalid DC: ${dc}`)
-            const card = await PassiveCheck.buildCard(party, checkType)
+            const card = await PassiveCheck.buildCard(members, checkType)
             card.whisperGM("Passive Check")
             return
         }
 
-        const card = await PassiveCheck.buildCard(party, checkType, parsedDC)
+        const card = await PassiveCheck.buildCard(members, checkType, parsedDC)
         card.whisperGM("Passive Check")
     });
 });
@@ -139,27 +141,30 @@ const PassiveCheck = (() => {
 
     /**
      * Builds the results card: one row per party member with avatar, name and
-     * score; with a DC, a Success/Failure verdict column is appended.
+     * score; with a DC, a Success/Failure verdict column is appended, colored
+     * via the ChatCards good/bad theme keys.
      *
-     * @param {PartyMan.Party} party
+     * @param {PartyMan.Member[]} members
      * @param {string} checkType - Any casing/spacing of a SKILLS entry.
      * @param {number} [dc] - Optional DC to judge against.
      * @returns {Promise<ChatCards.Card>}
      */
-    const buildCard = async (party, checkType, dc) => {
+    const buildCard = async (members, checkType, dc) => {
         const skill = normalize(checkType)
         const title = dc === undefined
             ? `Passive Check — ${displayName(skill)}`
             : `Passive Check - ${displayName(skill)} - DC: ${dc}`
         const card = new ChatCards.Card(title)
 
-        for (const pm of party.members) {
+        for (const pm of members) {
             const score = await getPassiveScore(pm.id, skill)
             const scoreCell = ChatCards.Card.num(score === null ? NO_SCORE : score)
             if (dc === undefined) {
                 card.addRow(...PartyMan.memberCells(pm), scoreCell)
             } else {
-                const verdict = score === null ? NO_SCORE : isPassiveSuccess(score, dc)
+                const verdict = score === null
+                    ? { content: NO_SCORE, style: "muted" }
+                    : { content: isPassiveSuccess(score, dc), style: score >= dc ? "good" : "bad" }
                 card.addRow(...PartyMan.memberCells(pm), scoreCell, verdict)
             }
         }
