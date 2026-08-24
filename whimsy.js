@@ -1,7 +1,19 @@
 // WhimsyName - unique random adjective prefixes from The Corpus
-// !whimsy        -> prefix all selected tokens (no repeats, ever, until reset)
+// !whimsy        -> prefix all selected tokens (no repeats until reset; rerolling
+//                   a token swaps its adjective and returns the old one to the pool)
+// !whimsy token  -> same, but base the name on the token's nameplate instead of
+//                   the represented character's sheet name
 // !whimsy reset  -> return all adjectives to the pool
 // !whimsy count  -> how many adjectives remain
+//
+// Base-name resolution, per token:
+//   1. WhimsyName's own record for this token (set the first time it's whimsied) —
+//      so rerolls never stack adjectives, whatever the nameplate says now
+//   2. with 'token': the current nameplate
+//   3. the represented character's name (compendium drops set represents)
+//   4. the current nameplate (no represents, or a dangling one)
+// Note: the default path reads the sheet name, so a token deliberately named
+// differently from its character (a disguised PC) should use '!whimsy token'.
 const WHIMSY_ADJECTIVES = [
     'Abandoned','Able','Absolute','Adorable','Adventurous','Academic','Acceptable','Acclaimed',
     'Accomplished','Accurate','Aching','Acidic','Acrobatic','Active','Actual','Adept','Admirable',
@@ -145,7 +157,17 @@ const WHIMSY_ADJECTIVES = [
 ];
 
 on('ready', () => {
-    if (!state.WhimsyName) state.WhimsyName = { used: {} };
+    if (!state.WhimsyName) state.WhimsyName = { used: {}, tokens: {} };
+    if (!state.WhimsyName.tokens) state.WhimsyName.tokens = {};
+
+    // A deleted token gives its adjective back to the pool and drops its record.
+    on('destroy:graphic', obj => {
+        const rec = state.WhimsyName.tokens[obj.id];
+        if (rec) {
+            delete state.WhimsyName.used[rec.adj];
+            delete state.WhimsyName.tokens[obj.id];
+        }
+    });
 
     on('chat:message', msg => {
         if (msg.type !== 'api' || !/^!whimsy\b/i.test(msg.content)) return;
@@ -162,6 +184,11 @@ on('ready', () => {
             sendChat('Whimsy', `/w gm ${left} of ${WHIMSY_ADJECTIVES.length} adjectives remain.`);
             return;
         }
+        if (arg !== '' && arg !== 'token') {
+            sendChat('Whimsy', '/w gm Usage: !whimsy [token|reset|count]');
+            return;
+        }
+        const useTokenName = arg === 'token';
 
         if (!msg.selected || !msg.selected.length) {
             sendChat('Whimsy', '/w gm No tokens selected.');
@@ -178,9 +205,25 @@ on('ready', () => {
                     sendChat('Whimsy', '/w gm The Corpus is exhausted. !whimsy reset to replenish.');
                     return;
                 }
+
+                // Resolve the base name (see header). A prior record always wins
+                // so a reroll swaps the adjective instead of stacking a second one.
+                const rec = state.WhimsyName.tokens[t.id];
+                let base;
+                if (rec) {
+                    base = rec.base;
+                } else if (useTokenName) {
+                    base = t.get('name');
+                } else {
+                    const char = getObj('character', t.get('represents'));
+                    base = (char && char.get('name')) || t.get('name');
+                }
+
                 const adj = pool[randomInteger(pool.length) - 1];
+                if (rec) delete state.WhimsyName.used[rec.adj];  // reroll: old adjective returns to the pool
                 state.WhimsyName.used[adj] = true;
-                t.set('name', `${adj} ${t.get('name')}`);
+                state.WhimsyName.tokens[t.id] = { base: base, adj: adj };
+                t.set('name', base ? `${adj} ${base}` : adj);
             });
     });
 });

@@ -85,7 +85,7 @@ card.addRow(ChatCards.Card.span(ChatCards.Card.tiles([
 
 ## conditions.js — `!cond`
 
-A condition handler that adds or removes status markers on selected tokens without clobbering markers set by other means.
+A CondSync-safe condition handler that adds or removes status markers on selected tokens without clobbering markers set by other means.
 
 ### Usage
 
@@ -330,17 +330,24 @@ Make it visible to all players so everyone rolls in the open.
 
 **WhimsyName** — prefixes selected tokens with a unique random adjective drawn from a ~900-word pool ("The Corpus"). Great for telling apart a pile of identical goblins: *Soggy Goblin*, *Majestic Goblin*, *Sniveling Goblin*.
 
-Adjectives are never repeated: each one used is removed from the pool (tracked in persistent `state`, so it survives sandbox restarts) until you reset it.
+Adjectives are never repeated while in play: each one in use is held out of the pool (tracked in persistent `state`, so it survives sandbox restarts). Whimsying an already-whimsied token **rerolls** it — the new adjective replaces the old one (never stacks), and the old adjective goes back in the pool. Deleting a whimsied token returns its adjective too, so The Corpus only ever holds out adjectives that are actually on the table.
 
 ### Usage
 
 | Command | Effect |
 |---|---|
-| `!whimsy` | Prefix each selected token's name with a unique random adjective |
+| `!whimsy` | Prefix each selected token with a unique adjective (or reroll it) |
+| `!whimsy token` | Same, but base the name on the token's nameplate instead of the sheet |
 | `!whimsy reset` | Return all adjectives to the pool |
 | `!whimsy count` | Whisper to the GM how many adjectives remain |
 
 If the pool runs dry, the script whispers `The Corpus is exhausted` and suggests a reset.
+
+### Where the base name comes from
+
+Per token, in order: the name WhimsyName recorded the first time it touched this token (this is what makes rerolls clean); with `token`, the current nameplate; otherwise the represented character's sheet name — compendium drops always set `represents`, so a rerolled goblin stays a *Goblin* even after three adjectives have come and gone; and finally the nameplate, for tokens with no (or a dangling) `represents`.
+
+> **Disguise caveat:** the default path reads the *sheet* name. A token deliberately nameplated differently from its character — a disguised PC — should get `!whimsy token`, or the reveal is on you.
 
 ### Examples
 
@@ -350,15 +357,17 @@ Select a group of freshly dropped mook tokens, then:
 !whimsy
 ```
 
+Don't like what the dice gave your boss goblin? Select just that token and run it again — *Soggy* goes back in the pool and something new comes out.
+
 ### Suggested macros
 
 ```
-Whimsy:      !whimsy
+Whimsy:      !whimsy ?{Name from|Sheet,|Token,token}
 WhimsyReset: !whimsy reset
 WhimsyCount: !whimsy count
 ```
 
-`Whimsy` works well as a token action so you can name mobs the moment you place them.
+`Whimsy` works well as a token action so you can name mobs the moment you place them — the prompt collapses to the normal sheet path unless you pick Token.
 
 ---
 

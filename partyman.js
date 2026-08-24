@@ -14,6 +14,17 @@ on('ready', async () => {
     initCard.addRow(htmlButton)
     initCard.send('PartyMan')
 
+    let resyncQueued = false
+    on("change:character", async (obj, prev) => {
+        if (obj.get("inParty") || obj.get("inParty") !== prev.inParty) {
+            if (resyncQueued) return
+            resyncQueued = true
+            setTimeout(async () => {
+                resyncQueued = false
+                pmParty = await new PartyMan.Party().syncParty()
+            }, 500)
+        }
+    })
 
     on('chat:message', async msg => {
         if (msg.type !== 'api' || !/^!pm\b/i.test(msg.content)) return;
