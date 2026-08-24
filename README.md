@@ -13,7 +13,7 @@ A collection of Roll20 API (Mod) scripts for game management. Paste the contents
 | [hp.js](#hpjs--hp) | `!hp` | — |
 | [partyman.js](#partymanjs--pm) | `!pm` | `chatCards.js` |
 | [passiveCheck.js](#passivecheckjs--pcheck) | `!pcheck` | `chatCards.js`, `partyman.js` |
-| [statRoller.js](#statrollerjs--rollstats) | `!rollstats` | — |
+| [statRoller.js](#statrollerjs--rollstats) | `!rollstats` | `chatCards.js` |
 | [whimsy.js](#whimsyjs--whimsy) | `!whimsy` | — |
 
 Roll20 evaluates every script into one shared sandbox namespace, so the shared code is organized into IIFE namespaces (`ChatCards`, `PartyMan`, `PassiveCheck`) that each expose a single global and keep their helpers private. Cross-namespace references happen inside function bodies, at call time — so **script load order does not matter**.
@@ -306,7 +306,9 @@ The type guard, the help card, and the sheet read all come from that one list, s
 
 ## statRoller.js — `!rollstats`
 
-Rolls a full set of six ability scores using the classic **4d6 drop lowest** method and posts the results to chat in a roll template, attributed to whoever ran the command.
+Rolls a full set of six ability scores using the classic **4d6 drop lowest** method and posts the results as a ChatCards tile strip, attributed to whoever ran the command — the same look as the Party Roster's ability tiles, so a fresh array reads like a character sheet from the moment it's rolled.
+
+> **Requires:** `chatCards.js`.
 
 ### Usage
 
@@ -314,7 +316,7 @@ Rolls a full set of six ability scores using the classic **4d6 drop lowest** met
 |---|---|
 | `!rollstats` | Roll 6 ability scores (4d6 drop lowest each) and post them |
 
-No token selection required. Output shows each stat's total, the four dice rolled (the dropped low die shown struck through), and the grand total of all six scores — handy for comparing arrays at session zero.
+No token selection required. Each tile shows the stat's total over the four dice rolled (the dropped low die struck through), with the grand total of all six scores on a footer row — handy for comparing arrays at session zero.
 
 ### Suggested macros
 

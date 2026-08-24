@@ -1,8 +1,13 @@
+// StatRoller - rolls a full ability-score array (4d6 drop lowest, six times)
+// and posts it as a ChatCards tile strip, attributed to whoever ran it.
+// !rollstats -> roll and post to public chat
+// Requires ChatCards (Card, THEME).
 on('ready', () => {
     on('chat:message', (msg) => {
-        if (msg.type !== 'api' || !msg.content.startsWith('!rollstats')) return;
+        if (msg.type !== 'api' || !/^!rollstats\b/i.test(msg.content)) return;
 
         const who = msg.who.replace(/ \(GM\)$/, '');
+
         const rollSet = () => {
             const dice = [0, 0, 0, 0].map(() => randomInteger(6));
             const sorted = [...dice].sort((a, b) => b - a);
@@ -13,19 +18,21 @@ on('ready', () => {
         const stats = [...Array(6)].map(rollSet);
         const sum = stats.reduce((a, s) => a + s.total, 0);
 
-        const rows = stats.map((s, i) => {
-            const shown = s.dice
-                .map((d, j) => {
-                    // mark one instance of the lowest die as dropped
-                    const dropIdx = s.dice.indexOf(Math.min(...s.dice));
-                    return j === dropIdx ? `~${d}~` : `**${d}**`;
-                })
-                .join(' ');
-            return `{{Stat ${i + 1} = **${s.total}**  (${shown})}}`;
-        }).join(' ');
+        // The four dice in rolled order, the dropped (lowest) one struck through.
+        // Styled span rather than <s>: inline styles reliably survive Roll20's
+        // chat sanitizer; bare tags aren't guaranteed to.
+        const diceText = (dice) => {
+            const dropIdx = dice.indexOf(Math.min(...dice));
+            return dice
+                .map((d, j) => j === dropIdx ? `<span style="text-decoration:line-through;opacity:0.5;">${d}</span>` : `${d}`)
+                .join('&nbsp;')
+        };
 
-        sendChat('StatRoller',
-            `&{template:default} {{name=${who} — Ability Scores}} ${rows} {{Total = **${sum}**}}`
-        );
+        const card = new ChatCards.Card(`${who} — Ability Scores`)
+        card.addRow(ChatCards.Card.span(ChatCards.Card.tiles(
+            stats.map((s, i) => ({ label: `Stat ${i + 1}`, value: s.total, sub: diceText(s.dice) }))
+        ), 2))
+        card.addRow("Total", ChatCards.Card.num(sum))
+        card.send('StatRoller')
     });
 });
