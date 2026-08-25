@@ -1,6 +1,10 @@
 // PassiveCheck - whispers the party's passive skill scores (optionally vs a DC) to the GM
 // usage: !pcheck insight (returns passive insight scores) / !pcheck perception 12 (with success/fail)
-// Requires PartyMan (Party, Member, memberCells) and ChatCards (Card, THEME).
+//
+// Scores come from PartyMan's cached skill bonuses, not from the sheet: a check
+// costs zero sheet reads. Run !pm refresh if a sheet changed (Beacon sheet-item
+// writes fire no sandbox event, so no cache can hear them).
+// Requires PartyMan (Party, memberCells, SKILLS vocabulary) and ChatCards (Card, THEME).
 on('ready', () => {
     on('chat:message', async msg => {
         // process chat
@@ -24,9 +28,9 @@ on('ready', () => {
         // Skills can be multi-word ("sleight of hand"), so match greedily first
         // and only then treat a trailing argument as the DC.
         let checkType, dc
-        if (PassiveCheck.isValidType(args.join(' '))) {
+        if (PartyMan.isSkill(args.join(' '))) {
             checkType = args.join(' ')
-        } else if (args.length > 1 && PassiveCheck.isValidType(args.slice(0, -1).join(' '))) {
+        } else if (args.length > 1 && PartyMan.isSkill(args.slice(0, -1).join(' '))) {
             checkType = args.slice(0, -1).join(' ')
             dc = args[args.length - 1]
         } else {
@@ -34,9 +38,7 @@ on('ready', () => {
             return;
         }
 
-        // getMembers, not new Party(): passive checks never touch default
-        // tokens, so skip the per-member token fetches Party kicks off.
-        const members = PartyMan.getMembers()
+        const members = (await PartyMan.getSyncedParty()).members
         //party guard
         if (members.length < 1) {
             whisperBack("Party not found")
@@ -44,21 +46,18 @@ on('ready', () => {
         }
 
         if (dc === undefined) {
-            const card = await PassiveCheck.buildCard(members, checkType)
-            card.whisperGM("Passive Check")
+            PassiveCheck.buildCard(members, checkType).whisperGM("Passive Check")
             return
         }
 
         const parsedDC = parseInt(dc)
         if (isNaN(parsedDC)) {
             whisperBack(`Invalid DC: ${dc}`)
-            const card = await PassiveCheck.buildCard(members, checkType)
-            card.whisperGM("Passive Check")
+            PassiveCheck.buildCard(members, checkType).whisperGM("Passive Check")
             return
         }
 
-        const card = await PassiveCheck.buildCard(members, checkType, parsedDC)
-        card.whisperGM("Passive Check")
+        PassiveCheck.buildCard(members, checkType, parsedDC).whisperGM("Passive Check")
     });
 });
 
@@ -66,67 +65,21 @@ on('ready', () => {
  * PassiveCheck namespace. Exposes only what the chat handler needs; everything
  * else stays private to the IIFE.
  *
+ * The skill vocabulary (SKILLS, normalize, display names) lives in PartyMan —
+ * the same `<skill>_bonus` powers a passive score and an active roll, so it is
+ * party vocabulary rather than this script's.
+ *
  * Rendering goes through ChatCards.Card, so output stays on-theme with every
  * other ChatCards-based tool.
  *
  * @namespace PassiveCheck
- * @property {Function} isValidType - Whether a string names a supported passive skill
  * @property {Function} buildCard - Builds the score card (verdict column when a DC is given)
  * @property {Function} helpText - Renders the help card
  */
 const PassiveCheck = (() => {
 
-    const BASE_VALUE = 10
-
-    /**
-     * Supported passive skills. The 2024 sheet names every skill bonus
-     * consistently as `<skill>_bonus`, so the attribute is derived rather than
-     * mapped — the guards, the help card and the sheet lookup all read from
-     * this one list. The DMG allows a passive version of any skill.
-     */
-    const SKILLS = ['acrobatics', 'animal_handling', 'arcana', 'athletics', 'deception', 'history',
-        'insight', 'intimidation', 'investigation', 'medicine', 'nature', 'perception',
-        'performance', 'persuasion', 'religion', 'sleight_of_hand', 'stealth', 'survival']
-
     /** Shown in place of a score the sheet couldn't supply. */
     const NO_SCORE = '—'
-
-    /**
-     * Normalizes user input to a SKILLS entry: case-insensitive, and spaces or
-     * hyphens become underscores, so "Animal Handling" and "sleight-of-hand"
-     * both resolve. Keeps macro dropdown labels friendly.
-     *
-     * @param {string} input
-     * @returns {string}
-     */
-    const normalize = (input) => input.toLowerCase().replace(/[\s-]+/g, '_')
-
-    const isValidType = (checkType) => SKILLS.includes(normalize(checkType))
-
-    /**
-     * Renders a skill key for display: 'sleight_of_hand' -> 'Sleight of Hand'.
-     *
-     * @param {string} skill - A SKILLS entry.
-     * @returns {string}
-     */
-    const displayName = (skill) => skill
-        .split('_')
-        .map((word, i) => (i > 0 && word === 'of') ? word : word.charAt(0).toUpperCase() + word.slice(1))
-        .join(' ')
-
-    /**
-     * Fetches one character's passive score for a skill.
-     *
-     * @param {string} charId
-     * @param {string} skill - A SKILLS entry.
-     * @returns {Promise<number|null>} 10 + the sheet's passive bonus, or null when
-     *   the sheet has no usable value for that attribute.
-     */
-    const getPassiveScore = async (charId, skill) => {
-        const bonus = await getSheetItem(charId, `${skill}_bonus`)
-        const score = Number(bonus) + BASE_VALUE
-        return Number.isNaN(score) ? null : score
-    }
 
     /**
      * Decides a passive check against a DC.
@@ -144,20 +97,24 @@ const PassiveCheck = (() => {
      * score; with a DC, a Success/Failure verdict column is appended, colored
      * via the ChatCards good/bad theme keys.
      *
+     * Synchronous — every score comes from PartyMan's cache, so there is nothing
+     * to await.
+     *
      * @param {PartyMan.Member[]} members
      * @param {string} checkType - Any casing/spacing of a SKILLS entry.
      * @param {number} [dc] - Optional DC to judge against.
-     * @returns {Promise<ChatCards.Card>}
+     * @returns {ChatCards.Card}
      */
-    const buildCard = async (members, checkType, dc) => {
-        const skill = normalize(checkType)
+    const buildCard = (members, checkType, dc) => {
+        const skill = PartyMan.normalizeSkill(checkType)
+        const name = PartyMan.skillDisplayName(skill)
         const title = dc === undefined
-            ? `Passive Check — ${displayName(skill)}`
-            : `Passive Check - ${displayName(skill)} - DC: ${dc}`
+            ? `Passive Check — ${name}`
+            : `Passive Check - ${name} - DC: ${dc}`
         const card = new ChatCards.Card(title)
 
         for (const pm of members) {
-            const score = await getPassiveScore(pm.id, skill)
+            const score = pm.skills.getPassive(skill)
             const scoreCell = ChatCards.Card.num(score === null ? NO_SCORE : score)
             if (dc === undefined) {
                 card.addRow(...PartyMan.memberCells(pm), scoreCell)
@@ -172,7 +129,7 @@ const PassiveCheck = (() => {
     }
 
     /**
-     * Renders the help card from the SKILLS list, styled via ChatCards.THEME.
+     * Renders the help card from PartyMan's skill list, styled via ChatCards.THEME.
      *
      * @returns {string}
      */
@@ -186,7 +143,7 @@ const PassiveCheck = (() => {
             `<tr><td style="${t.cell}"><b>${cmd}</b></td><td style="${t.cell}">${desc}</td></tr>`
         ).join("")
 
-        const skillList = SKILLS.map(displayName).join(', ')
+        const skillList = PartyMan.SKILLS.map(PartyMan.skillDisplayName).join(', ')
 
         return `<div style="${t.card}">` +
             `<div style="${t.header}">Passive Check — Help</div>` +
@@ -196,10 +153,10 @@ const PassiveCheck = (() => {
             usage +
             `</table>` +
             `<div style="margin-top:4px;"><b>Skills:</b> ${skillList}</div>` +
-            `<div style="margin-top:4px;${t.muted}">Requires PartyMan. Scores are ${BASE_VALUE} + the sheet's passive bonus.</div>` +
+            `<div style="margin-top:4px;${t.muted}">Requires PartyMan. Scores are ${PartyMan.PASSIVE_BASE} + the sheet's passive bonus, read from PartyMan's cache — run <b>!pm refresh</b> after sheet edits.</div>` +
             `</div>` +
             `</div>`
     }
 
-    return { isValidType, buildCard, helpText }
+    return { buildCard, helpText }
 })()

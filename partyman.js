@@ -3,11 +3,19 @@
 on('ready', async () => {
     log("Starting PartyMan")
 
-    let pmParty = await new PartyMan.Party().syncParty()
+    // The sync is the slow part, and it is awaited before the card goes out —
+    // so the card appearing in chat IS the readiness signal: cache warm, every
+    // script built on PartyMan can now read party data with zero sheet traffic.
+    const party = await PartyMan.refreshParty()
+    log(`PartyMan ready — ${party.members.length} member(s) synced`)
 
     let htmlButton = `<div style="text-align: center;">${ChatCards.Card.button("Display Party", "!pm party")}</div>`;
 
-    const initCard = new ChatCards.Card("Party Man")
+    const initCard = new ChatCards.Card("PartyMan Ready")
+    initCard.addRow({
+        content: `<div style="text-align:center;">${party.members.length} party member(s) synced</div>`,
+        style: "muted"
+    })
     initCard.addRow(htmlButton)
     initCard.send('PartyMan')
 
@@ -18,7 +26,7 @@ on('ready', async () => {
             resyncQueued = true
             setTimeout(async () => {
                 resyncQueued = false
-                pmParty = await new PartyMan.Party().syncParty()
+                await PartyMan.refreshParty()
             }, 500)
         }
     })
@@ -34,7 +42,7 @@ on('ready', async () => {
 
         if (cmd === 'party') {
             const card = new ChatCards.Card("Party Roster")
-            for (const member of pmParty.members) {
+            for (const member of (await PartyMan.getSyncedParty()).members) {
                 card.addRow(...PartyMan.memberCells(member, 'lg'))
                 card.addRow(member.abilityScores.abilityScoreCells(2))
             }
@@ -42,7 +50,8 @@ on('ready', async () => {
         }
 
         if (cmd === 'refresh') {
-            pmParty = await new PartyMan.Party().syncParty()
+            const party = await PartyMan.refreshParty()
+            sendChat('PartyMan', `/w gm Party re-synced — ${party.members.length} member(s).`)
         }
     });
 });
@@ -53,14 +62,87 @@ on('ready', async () => {
  * everything as `PartyMan.<thing>` and cannot collide with other sandbox
  * scripts' globals.
  *
+ * Also the home of the shared skill vocabulary (SKILLS, normalizeSkill,
+ * skillDisplayName): the same `<skill>_bonus` drives passive scores and active
+ * rolls, so it belongs to the party layer rather than to any one check script.
+ *
  * @namespace PartyMan
+ * @property {string[]} SKILLS - The 18 skills, as the 2024 sheet names them
+ * @property {number} PASSIVE_BASE - The 10 in `passive = 10 + bonus`
+ * @property {Function} normalizeSkill - User input -> a SKILLS entry
+ * @property {Function} isSkill - Whether a string names a supported skill
+ * @property {Function} skillDisplayName - 'sleight_of_hand' -> 'Sleight of Hand'
+ * @property {Function} modText - 5 -> '+5'
  * @property {Function} getParty - Raw party character objects
- * @property {Function} getMembers - Party characters wrapped as Member instances
+ * @property {Function} getMembers - Party characters wrapped as Member instances (unsynced)
+ * @property {Function} getSyncedParty - The cached, sheet-synced Party (syncs if cold)
+ * @property {Function} getCachedParty - The cached Party, or null before first sync
+ * @property {Function} refreshParty - Re-sync from the sheets and replace the cache
  * @property {Function} memberCells - Avatar + name cells for a ChatCards.Card row
  * @property {Class} Member - Snapshot of one party character
+ * @property {Class} MemberAbilityScores - One member's six ability scores
+ * @property {Class} MemberSkills - One member's cached skill bonuses
  * @property {Class} Party - The member collection
  */
 const PartyMan = (() => {
+
+    /*
+    ***********************************************************************************
+    ******************************Skill vocabulary*************************************
+    ***********************************************************************************
+    */
+
+    /**
+     * The 18 skills, as the 2024 sheet names them. The sheet exposes every skill
+     * bonus as `<skill>_bonus`, so the attribute is derived rather than mapped.
+     *
+     * This lives in PartyMan rather than in either check script because it is
+     * party vocabulary, not passive-specific or active-specific: the same bonus
+     * drives a passive score (10 + bonus) and an active roll (d20 + bonus).
+     */
+    const SKILLS = ['acrobatics', 'animal_handling', 'arcana', 'athletics', 'deception', 'history',
+        'insight', 'intimidation', 'investigation', 'medicine', 'nature', 'perception',
+        'performance', 'persuasion', 'religion', 'sleight_of_hand', 'stealth', 'survival']
+
+    /** The 10 a passive score is built on: passive = PASSIVE_BASE + skill bonus. */
+    const PASSIVE_BASE = 10
+
+    /**
+     * Normalizes user input to a SKILLS entry: case-insensitive, and spaces or
+     * hyphens become underscores, so "Animal Handling" and "sleight-of-hand"
+     * both resolve. Keeps macro dropdown labels friendly.
+     *
+     * @param {string} input
+     * @returns {string}
+     */
+    const normalizeSkill = (input) => input.toLowerCase().replace(/[\s-]+/g, '_')
+
+    /**
+     * True when a string names a supported skill, in any casing/spacing.
+     *
+     * @param {string} input
+     * @returns {boolean}
+     */
+    const isSkill = (input) => SKILLS.includes(normalizeSkill(input))
+
+    /**
+     * Renders a skill key for display: 'sleight_of_hand' -> 'Sleight of Hand'.
+     *
+     * @param {string} skill - A SKILLS entry.
+     * @returns {string}
+     */
+    const skillDisplayName = (skill) => skill
+        .split('_')
+        .map((word, i) => (i > 0 && word === 'of') ? word : word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ')
+
+    /**
+     * Formats a modifier as sheet-style text: '+5', '-1', '+0'.
+     *
+     * @param {number} mod
+     * @returns {string}
+     */
+    const modText = (mod) => mod >= 0 ? `+${mod}` : `${mod}`
 
     /*
     ***********************************************************************************
@@ -166,6 +248,73 @@ const PartyMan = (() => {
     }
 
     /**
+     * One member's skill bonuses, cached from the sheet.
+     *
+     * The cached bonus serves both check styles: a passive score is
+     * `PASSIVE_BASE + bonus`, an active roll is `d20 + bonus`. Scripts that
+     * read from here do zero sheet traffic per check.
+     */
+    class MemberSkills {
+        constructor(charId) {
+            this.member = charId
+            this.skills = {}
+        }
+
+        /**
+         * Loads every skill bonus from the sheet concurrently.
+         *
+         * A skill the sheet has no usable value for is stored as null rather
+         * than NaN, so callers can distinguish "no such attribute" from a
+         * legitimate +0.
+         *
+         * @returns {Promise<MemberSkills>} this, once populated.
+         */
+        async syncSkills() {
+            const values = await Promise.all(
+                SKILLS.map(skill => getSheetItem(this.member, `${skill}_bonus`))
+            )
+            SKILLS.forEach((skill, i) => {
+                const n = Number(values[i])
+                this.skills[skill] = Number.isNaN(n) ? null : n
+            })
+            return this
+        }
+
+        /**
+         * The cached bonus for a skill, or null if the sheet had no usable value.
+         *
+         * @param {string} skill - Any casing/spacing of a SKILLS entry.
+         * @returns {number|null}
+         */
+        getMod(skill) {
+            const key = normalizeSkill(skill)
+            return this.skills[key] === undefined ? null : this.skills[key]
+        }
+
+        /**
+         * The cached bonus as sheet-style text ('+5'), or null if unavailable.
+         *
+         * @param {string} skill
+         * @returns {string|null}
+         */
+        getModText(skill) {
+            const mod = this.getMod(skill)
+            return mod === null ? null : modText(mod)
+        }
+
+        /**
+         * The passive score for a skill: PASSIVE_BASE + bonus.
+         *
+         * @param {string} skill
+         * @returns {number|null} null when the sheet has no usable bonus.
+         */
+        getPassive(skill) {
+            const mod = this.getMod(skill)
+            return mod === null ? null : PASSIVE_BASE + mod
+        }
+    }
+
+    /**
      * Represents a party member, holding information about their character sheet, name,
      * controlling player, avatar, and associated token data.
      */
@@ -178,6 +327,7 @@ const PartyMan = (() => {
             this.avatar = char.get("avatar")
             this.defaultToken = {}
             this.abilityScores = new MemberAbilityScores(this.id)
+            this.skills = new MemberSkills(this.id)
 
         }
 
@@ -200,6 +350,20 @@ const PartyMan = (() => {
             await this.abilityScores.syncScores()
         }
 
+        async syncSkills() {
+            await this.skills.syncSkills()
+        }
+
+        /**
+         * Loads everything this member caches from the sheet, concurrently.
+         *
+         * @returns {Promise<Member>} this, once populated.
+         */
+        async syncSheet() {
+            await Promise.all([this.abilityScores.syncScores(), this.skills.syncSkills()])
+            return this
+        }
+
 
     }
 
@@ -219,17 +383,72 @@ const PartyMan = (() => {
         }
 
         /**
-         * Refreshes the member list and loads every member's scores
-         * concurrently (one await for the whole party, not one per member).
+         * Refreshes the member list and loads every member's sheet data —
+         * ability scores and skill bonuses — concurrently across the whole
+         * party (one await for everything, not one per member per dataset).
+         *
+         * This is the slow call by design: it takes the sheet-traffic hit once
+         * at startup so every script built on PartyMan reads from memory.
          *
          * @returns {Promise<Party>} this, once every member is populated.
          */
         async syncParty() {
             this.members = getMembers()
-            await Promise.all(this.members.map(member => member.abilityScores.syncScores()))
+            await Promise.all(this.members.map(member => member.syncSheet()))
             return this
         }
+
+        /**
+         * Finds a member of this party by character id.
+         *
+         * @param {string} charId
+         * @returns {Member|undefined}
+         */
+        getMember(charId) {
+            return this.members.find(m => m.id === charId)
+        }
     }
+
+    /*
+    ***********************************************************************************
+    ******************************The cached party*************************************
+    ***********************************************************************************
+    */
+
+    /**
+     * The synced party, cached in the namespace rather than in a handler
+     * closure so every script built on PartyMan reads the same one.
+     */
+    let cachedParty = null
+
+    /**
+     * The party as last synced. Null before the first sync completes — prefer
+     * getSyncedParty() unless you specifically want the cold-cache case.
+     *
+     * @returns {Party|null}
+     */
+    const getCachedParty = () => cachedParty
+
+    /**
+     * Re-syncs the party from the sheets and replaces the cache. This is the
+     * expensive call; everything downstream reads the result from memory.
+     *
+     * @returns {Promise<Party>}
+     */
+    const refreshParty = async () => {
+        cachedParty = await new Party().syncParty()
+        return cachedParty
+    }
+
+    /**
+     * The synced party, syncing on first use if the cache is cold. The safe
+     * default for any script that needs party data:
+     *
+     *     const party = await PartyMan.getSyncedParty()
+     *
+     * @returns {Promise<Party>}
+     */
+    const getSyncedParty = async () => cachedParty || await refreshParty()
 
     /*
     ***********************************************************************************
@@ -267,5 +486,10 @@ const PartyMan = (() => {
         ]
     }
 
-    return { getParty, getMembers, Member, Party, memberCells, MemberAbilityScores }
+    return {
+        SKILLS, PASSIVE_BASE, normalizeSkill, isSkill, skillDisplayName, modText,
+        getParty, getMembers, memberCells,
+        getCachedParty, refreshParty, getSyncedParty,
+        Member, Party, MemberAbilityScores, MemberSkills
+    }
 })()
