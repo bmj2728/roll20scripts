@@ -26,7 +26,8 @@ on('ready', async () => {
             resyncQueued = true
             setTimeout(async () => {
                 resyncQueued = false
-                await PartyMan.refreshParty()
+                const fresh = await PartyMan.refreshParty()
+                sendChat('PartyMan', `/w gm Party re-synced — ${fresh.members.length} member(s).`)
             }, 500)
         }
     })
