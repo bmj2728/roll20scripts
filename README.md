@@ -18,6 +18,8 @@ A collection of Roll20 API (Mod) scripts for game management. Paste the contents
 
 Roll20 evaluates every script into one shared sandbox namespace, so the shared code is organized into IIFE namespaces (`ChatCards`, `PartyMan`, `PassiveCheck`, `StatRoller`) that each expose a single global and keep their helpers private. Cross-namespace references happen inside function bodies, at call time — so **script load order does not matter**.
 
+The dependency chain runs `chatCards.js` → `partyman.js` → `passiveCheck.js`: rendering knows nothing about parties, the party layer knows nothing about checks. `PARTYCHECK_PLAN.md` is the design doc for PartyCheck, the in-progress group-check tool that builds on the same layers.
+
 ---
 
 ## chatCards.js — `ChatCards`
@@ -39,7 +41,7 @@ Keeping the styling in one theme object means every tool built on it stays visua
 | `avatarCellLg` / `avatarLg` | Larger avatar variant, for rows acting as section headers |
 | `name` / `nameLg` | Name cell in the matching sizes (`nameLg` is bigger and bold) |
 | `good` / `bad` | Semantic verdict cells — green/red bold (pass/fail, gain/loss) |
-| `muted` | De-emphasized footnote text |
+| `muted` | De-emphasized text — footnotes, and full-width detail rows like the roster's |
 | `button` | Chat buttons (`<a>` styled as a button) |
 | `tileRow`, `tile`, `tileLabel`, `tileValue`, `tileMod` | The stat-tile strip (see `Card.tiles`) |
 
@@ -177,7 +179,9 @@ SetHP:   !hp ?{New HP}
 
 **PartyMan** — the party data layer. Originally planned as a pile of heuristics to identify party members, but the character object now carries an `inParty` flag, so it simply queries that. Other scripts (Passive Check, and anything else party-shaped) build on it.
 
-The flagship view is the Party Roster: each member as a header row (large avatar + name) over a strip of ability-score tiles, character-sheet style.
+PartyMan syncs every member's sheet data **once** at sandbox start and caches it in the namespace. That sync is deliberately the slow part — it takes the sheet-traffic hit on behalf of every script built on it, so a check at the table costs zero sheet reads. The *PartyMan Ready* card is the signal it finished.
+
+The flagship view is the Party Roster: each member as a header row (large avatar + name), a detail line, and a strip of ability-score tiles, character-sheet style. Party membership isn't limited to PCs — a familiar or companion with a stat block sits in the roster too, and simply reports the fields its sheet has (Batrick, below, is a bat).
 
 ![Party Roster card](assets/pm-roster.png)
 
@@ -185,37 +189,65 @@ The flagship view is the Party Roster: each member as a header row (large avatar
 
 ### `PartyMan` namespace
 
+#### The cached party
+
+Any script that needs party data goes through the cache rather than building its own:
+
 | Member | What it does |
 |---|---|
-| `getParty()` | Returns the raw character objects flagged `inParty: true` |
-| `getMembers()` | Wraps each party character in a `Member` — the cheap path when you don't need token or score syncs |
-| `Member` | Snapshot of one party character: `id`, `characterName`, `characterSheet`, `controlledBy`, `avatar`, `defaultToken`, `abilityScores`, plus `syncDefaultToken()` and `syncAbilityScores()` |
-| `MemberAbilityScores` | One member's six scores; `syncScores()` loads them from the sheet concurrently, `getAbilityMod()` / `getAbilityModText()` derive modifiers, `abilityScoreCells(span)` renders the tile strip |
-| `Party` | Builds the member list and kicks off a default-token sync for each member; `syncParty()` refreshes the list and loads every member's scores (concurrently across the whole party) |
-| `memberCells(member, [size])` | Returns the avatar + name cells for a `ChatCards.Card` row — `'sm'` (default) for dense data rows, `'lg'` for section-header rows like the roster |
+| `getSyncedParty()` | *async* — the cached, sheet-synced `Party`, syncing on first use. **The safe default.** |
+| `getCachedParty()` | *sync* — the cache, or `null` before the first sync completes |
+| `refreshParty()` | *async* — re-sync from the sheets and replace the cache |
+| `getParty()` | The raw character objects flagged `inParty: true` |
+| `getMembers()` | Party characters wrapped as `Member`s — **unsynced**, so their caches are empty; use `getSyncedParty()` unless you specifically want that |
 
-`Member.syncDefaultToken()` returns a Promise, since Roll20 only exposes `_defaulttoken` through a callback. Sync methods await their sheet reads properly, so `await party.syncParty()` guarantees populated scores afterwards.
+#### Classes
+
+| Member | What it does |
+|---|---|
+| `Member` | Snapshot of one party character: `id`, `characterName`, `characterSheet`, `controlledBy`, `avatar`, `defaultToken`, plus the three sheet caches (`abilityScores`, `skills`, `details`) and `syncSheet()`, which loads all of them concurrently |
+| `MemberAbilityScores` | The six scores; `getAbilityMod()` / `getAbilityModText()` derive modifiers locally, `abilityScoreCells(span)` renders the tile strip |
+| `MemberSkills` | All 18 skill bonuses; `getMod()`, `getModText()`, and `getPassive()` (which adds `PASSIVE_BASE`) |
+| `MemberDetails` | Race, background, level, classes; `summaryText()` renders the roster's detail line, `detailCells(span)` returns it as a cell — or `null` when the sheet supplied nothing |
+| `Party` | The member collection; `syncParty()` refreshes the list and loads every member's sheet data concurrently across the whole party, `getMember(charId)` finds one |
+
+#### Shared vocabulary
+
+| Member | What it does |
+|---|---|
+| `SKILLS` | The 18 skills as the 2024 sheet names them |
+| `PASSIVE_BASE` | The 10 in `passive = 10 + bonus` |
+| `normalizeSkill()` / `isSkill()` / `skillDisplayName()` | User input → a `SKILLS` entry; validation; `'sleight_of_hand'` → `'Sleight of Hand'` |
+| `modText(5)` | `'+5'` |
+| `NO_VALUE` | The `—` placeholder for anything the sheet couldn't supply |
+| `memberCells(member, [size])` | Avatar + name cells for a `ChatCards.Card` row — `'sm'` (default) for dense data rows, `'lg'` for section-header rows like the roster |
+
+The skill vocabulary lives here rather than in a check script because the same `<skill>_bonus` drives **both** a passive score (`10 + bonus`) and an active roll (`d20 + bonus`) — it's party vocabulary, not passive-specific.
 
 `memberCells` is the seam between the party data and the card renderer: spread it into a row, then append whatever the calling script needs.
 
 ```js
 const card = new ChatCards.Card("Passive Check — Insight")
-for (const member of PartyMan.getMembers()) {
-    card.addRow(...PartyMan.memberCells(member), ChatCards.Card.num(score))
+for (const member of (await PartyMan.getSyncedParty()).members) {
+    card.addRow(...PartyMan.memberCells(member), ChatCards.Card.num(member.skills.getPassive('insight')))
 }
 card.whisperGM("Passive Check")
 ```
 
-On sandbox start PartyMan syncs the party once and caches it, so `!pm party` responds instantly. A debounced `change:character` listener keeps the cache self-healing for membership flips and edits to current members (renames, avatars). The blind spot is sheet data: Beacon sheet-item writes (ability scores, a magic belt) fire no sandbox event, so `!pm refresh` remains the escape hatch after stat changes.
+#### Cache freshness
+
+A debounced `change:character` listener keeps the cache self-healing for membership flips and edits to the character object itself. Field testing narrowed what actually fires it: **adding or removing a party member**, essentially. The blind spot is sheet data — Beacon sheet-item writes (ability scores, a magic belt, a level-up) fire no sandbox event at all, so `!pm refresh` is the escape hatch after any sheet edit.
+
+Every sheet value is null-guarded, so a party member who is a creature stat block rather than a PC (a familiar, a summon) renders `—` and an omitted detail line instead of `undefined`.
 
 ### Usage
 
 | Command | Effect |
 |---|---|
 | `!pm party` | Post the Party Roster card (from the startup cache) |
-| `!pm refresh` | Force a re-sync — needed after sheet edits (ability scores), which fire no event the cache can hear |
+| `!pm refresh` | Force a re-sync — needed after sheet edits, which fire no event the cache can hear |
 
-No token selection required — membership comes from the characters' `inParty` flag. On sandbox start PartyMan also posts a Party Man card with a Display Party button.
+No token selection required — membership comes from the characters' `inParty` flag. On sandbox start PartyMan posts a *PartyMan Ready* card with the synced member count and a Display Party button; because the card is sent **after** the sync resolves, its appearance is the readiness signal.
 
 ### Suggested macros
 
@@ -230,7 +262,9 @@ Or just click the button PartyMan posts to chat when the sandbox spins up.
 
 ## passiveCheck.js — `!pcheck`
 
-**Passive Check** — reads the party's passive score for **any of the 18 skills** from their **D&D 2024 sheets** (the sheet's `<skill>_bonus` attribute plus a base 10) and whispers the results to the GM as a card. No token selection needed — the party comes from PartyMan — so it's ideal for quietly checking whether anyone notices the ambush, or for a group passive Stealth against the guards' passive Perception.
+**Passive Check** — reports the party's passive score for **any of the 18 skills** (the sheet's `<skill>_bonus` plus a base 10) and whispers the results to the GM as a card. No token selection needed — the party comes from PartyMan — so it's ideal for quietly checking whether anyone notices the ambush, or for a group passive Stealth against the guards' passive Perception.
+
+Scores are read from **PartyMan's cache, not the sheet**, so a check costs zero sheet reads and lands instantly. That matters at the table: a pause after `!pcheck perception` is dead air while everyone waits to find out whether they heard the goblins.
 
 Pass an optional DC to get a Success/Failure verdict per member (score ≥ DC succeeds), colored green/red via the ChatCards `good`/`bad` theme keys — color for the glance, word for certainty. Without a DC you get the raw scores.
 
@@ -238,7 +272,7 @@ Pass an optional DC to get a Success/Failure verdict per member (score ≥ DC su
 
 ![Passive Check output — with DC](assets/pcheck-dc.png)
 
-> **Requires:** `chatCards.js` and `partyman.js`.
+> **Requires:** `chatCards.js` and `partyman.js` (which supplies both the party and the skill vocabulary).
 
 ### Usage
 
@@ -293,15 +327,16 @@ GroupStealth: !pcheck stealth ?{Enemy passive Perception|10}
 
 ### How the lookup works
 
-Supported skills are one list inside the `PassiveCheck` namespace, and the sheet attribute is derived from it rather than mapped:
+The skill list lives in **PartyMan**, and the sheet attribute is derived from it rather than mapped:
 
 ```js
-const SKILLS = ['acrobatics', 'animal_handling', 'arcana', /* ... */ 'stealth', 'survival']
-
-const bonus = await getSheetItem(charId, `${skill}_bonus`)
+PartyMan.SKILLS          // ['acrobatics', 'animal_handling', ... 'stealth', 'survival']
+member.skills.getPassive('perception')   // PASSIVE_BASE + the cached bonus
 ```
 
-The type guard, the help card, and the sheet read all come from that one list, so there's nothing per-skill to maintain. This relies on the 2024 sheet naming every skill bonus as `<skill>_bonus` — verified against the sheet, including the multi-word ones.
+The type guard, the help card, and the score all come from that one list, so there's nothing per-skill to maintain. This relies on the 2024 sheet naming every skill bonus as `<skill>_bonus` — verified against the sheet, including the multi-word ones.
+
+Because scores come from the cache, a sheet edit won't show up until the cache refreshes — run `!pm refresh` after changing a sheet mid-session.
 
 ---
 
@@ -415,4 +450,6 @@ A few habits that keep these playing nicely in Roll20's shared sandbox:
 - **Whisper by audience.** Results the GM shouldn't share go to the GM; help and error text goes back to the person who typed the command.
 - **Beacon sheet-item writes are silent.** Field-tested: editing sheet data (even via effects like a strength-setting belt) fires neither `change:attribute` nor `change:character`. Membership and character-object changes do fire `change:character`. Any cache of sheet data therefore needs an explicit refresh command; caches of membership can self-heal with a listener.
 - **Layout with tables, not flex.** Roll20's chat sanitizer strips `display:flex`; inner tables with `table-layout:fixed` are what actually survive, at every chat width.
+- **Cache at the layer, derive at the edge.** PartyMan pays the sheet cost once at startup so every downstream script reads from memory; anything with a closed formula (an ability modifier is `(score - 10) / 2`) is computed locally rather than fetched. Fetch only what the sheet actually owns — a skill bonus folds in proficiency and expertise you can't reconstruct.
+- **Null-guard every sheet read.** A party member may be a creature stat block with no class, no background, and no ability scores. Missing values become `null` and render as `PartyMan.NO_VALUE`, never `undefined` or `NaN`.
 - **Fetch only what the command needs.** Passive Check builds its member list with `getMembers()` rather than `new Party()`, skipping default-token fetches it would never use.
