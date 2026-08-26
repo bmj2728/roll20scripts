@@ -33,7 +33,7 @@ const ChatCards = (() => {
         avatarLg:   "width:34px;height:34px;border-radius:5px;",
         name:       "padding:2px 6px;",
         nameLg:     "padding:4px 6px;font-size:14px;font-weight:bold;",
-        muted:      "color:#aaa;",
+        muted:      "color:#aaa;padding:2px 6px;",
         // Semantic verdict cells: pass/fail, up/down, gain/loss
         good:       "padding:2px 6px;color:#46a758;font-weight:bold;",
         bad:        "padding:2px 6px;color:#e5484d;font-weight:bold;",
