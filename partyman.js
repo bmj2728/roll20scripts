@@ -45,6 +45,8 @@ on('ready', async () => {
             const card = new ChatCards.Card("Party Roster")
             for (const member of (await PartyMan.getSyncedParty()).members) {
                 card.addRow(...PartyMan.memberCells(member, 'lg'))
+                const detailRow = member.details.detailCells(2)
+                if (detailRow) card.addRow(detailRow)
                 card.addRow(member.abilityScores.abilityScoreCells(2))
             }
             card.send('PartyMan')
@@ -70,6 +72,7 @@ on('ready', async () => {
  * @namespace PartyMan
  * @property {string[]} SKILLS - The 18 skills, as the 2024 sheet names them
  * @property {number} PASSIVE_BASE - The 10 in `passive = 10 + bonus`
+ * @property {string} NO_VALUE - Placeholder for a value the sheet couldn't supply
  * @property {Function} normalizeSkill - User input -> a SKILLS entry
  * @property {Function} isSkill - Whether a string names a supported skill
  * @property {Function} skillDisplayName - 'sleight_of_hand' -> 'Sleight of Hand'
@@ -83,6 +86,7 @@ on('ready', async () => {
  * @property {Class} Member - Snapshot of one party character
  * @property {Class} MemberAbilityScores - One member's six ability scores
  * @property {Class} MemberSkills - One member's cached skill bonuses
+ * @property {Class} MemberDetails - One member's race/background/level/classes
  * @property {Class} Party - The member collection
  */
 const PartyMan = (() => {
@@ -145,6 +149,58 @@ const PartyMan = (() => {
      */
     const modText = (mod) => mod >= 0 ? `+${mod}` : `${mod}`
 
+    /**
+     * Sheet values arrive as strings, numbers, empty strings or undefined
+     * depending on the sheet and the character type. Normalizes all of that to
+     * a trimmed string or null.
+     *
+     * @param {*} value
+     * @returns {string|null}
+     */
+    /** Shown in place of a value the sheet couldn't supply. */
+    const NO_VALUE = '—'
+
+    /**
+     * Sheet numbers arrive as strings, numbers or nothing at all. Normalizes to
+     * a finite number, or null when the sheet has no usable value — so callers
+     * can tell "this sheet has no such field" from a legitimate 0.
+     *
+     * @param {*} value
+     * @returns {number|null}
+     */
+    const cleanNumber = (value) => {
+        const n = Number(value)
+        return (value === null || value === undefined || value === '' || !Number.isFinite(n)) ? null : n
+    }
+
+    const cleanText = (value) => {
+        if (value === null || value === undefined) return null
+        const text = String(value).trim()
+        return text.length ? text : null
+    }
+
+    /**
+     * Parses the sheet's `class_display` field into class names.
+     *
+     * Known 2024-sheet bug: class_display reports every class at level 0
+     * ("Fighter 0, Rogue 0") — the sheet's own GUI shows the same bad data, so
+     * it is upstream, not ours. We strip a trailing zero but leave any other
+     * number alone, so if the bug is ever fixed the real per-class levels
+     * ("Fighter 3/Rogue 2") come through on their own.
+     *
+     * Also note: the sheet exposes no subclass, so PartyMan cannot report one.
+     *
+     * @param {*} raw - The class_display value, or nothing at all.
+     * @returns {string[]} Class names; empty for creatures with no class.
+     */
+    const parseClassDisplay = (raw) => {
+        const text = cleanText(raw)
+        if (!text) return []
+        return text.split(',')
+            .map(entry => entry.trim().replace(/\s+0$/, '').trim())
+            .filter(entry => entry.length)
+    }
+
     /*
     ***********************************************************************************
     ******************************Party & Party Member*********************************
@@ -179,12 +235,12 @@ const PartyMan = (() => {
     class MemberAbilityScores {
         constructor(charId) {
             this.member = charId
-            this.str = 0
-            this.dex = 0
-            this.con = 0
-            this.int = 0
-            this.wis = 0
-            this.cha = 0
+            this.str = null
+            this.dex = null
+            this.con = null
+            this.int = null
+            this.wis = null
+            this.cha = null
         }
 
         /**
@@ -203,17 +259,25 @@ const PartyMan = (() => {
                 getSheetItem(this.member, "wisdom"),
                 getSheetItem(this.member, "charisma")
             ])
-            this.str = str
-            this.dex = dex
-            this.con = con
-            this.int = int
-            this.wis = wis
-            this.cha = cha
+            this.str = cleanNumber(str)
+            this.dex = cleanNumber(dex)
+            this.con = cleanNumber(con)
+            this.int = cleanNumber(int)
+            this.wis = cleanNumber(wis)
+            this.cha = cleanNumber(cha)
             return this
         };
 
+        /**
+         * The modifier for an ability, or null when the sheet had no score —
+         * a creature stat block or object may be missing them entirely.
+         *
+         * @param {string} ability - 'str' | 'dex' | 'con' | 'int' | 'wis' | 'cha'
+         * @returns {number|null}
+         */
         getAbilityMod(ability) {
-            return Math.floor((this[ability] - 10) / 2)
+            const score = this[ability]
+            return score === null ? null : Math.floor((score - 10) / 2)
         }
 
         /**
@@ -224,7 +288,7 @@ const PartyMan = (() => {
          */
         getAbilityModText(ability) {
             const mod = this.getAbilityMod(ability)
-            return mod >= 0 ? `+${mod}` : `${mod}`
+            return mod === null ? NO_VALUE : modText(mod)
         }
 
         /**
@@ -240,7 +304,7 @@ const PartyMan = (() => {
         abilityScoreCells(span = 2) {
             const tiles = ['str', 'dex', 'con', 'int', 'wis', 'cha'].map(a => ({
                 label: a.toUpperCase(),
-                value: this[a],
+                value: this[a] === null ? NO_VALUE : this[a],
                 sub: this.getAbilityModText(a)
             }))
             return ChatCards.Card.span(ChatCards.Card.tiles(tiles), span, "padding:0;")
@@ -316,6 +380,92 @@ const PartyMan = (() => {
     }
 
     /**
+     * One member's descriptive sheet details: race, background, level, classes.
+     *
+     * Every field is optional by design — a party member may be a creature
+     * stat block (a familiar, a summon) with none of them. Missing values stay
+     * null and simply drop out of the rendered summary rather than printing
+     * "undefined".
+     */
+    class MemberDetails {
+        constructor(charId) {
+            this.member = charId
+            this.race = null
+            this.background = null
+            this.level = null
+            this.classes = []
+        }
+
+        /**
+         * Loads the detail fields from the sheet concurrently.
+         *
+         * @returns {Promise<MemberDetails>} this, once populated.
+         */
+        async syncDetails() {
+            const [race, background, level, classDisplay] = await Promise.all([
+                getSheetItem(this.member, "race"),
+                getSheetItem(this.member, "background"),
+                getSheetItem(this.member, "level"),
+                getSheetItem(this.member, "class_display")
+            ])
+            this.race = cleanText(race)
+            this.background = cleanText(background)
+            const lvl = Number(level)
+            this.level = Number.isFinite(lvl) && lvl > 0 ? lvl : null
+            this.classes = parseClassDisplay(classDisplay)
+            return this
+        }
+
+        /** Classes joined for display: 'Fighter/Rogue'. Empty string if none. */
+        get classText() {
+            return this.classes.join('/')
+        }
+
+        /**
+         * A one-line summary, skipping anything the sheet didn't supply:
+         *
+         *     'Human - Sage - Level 5 (Fighter/Rogue)'
+         *     'Tiny Beast'            (a familiar with only a race-ish field)
+         *     ''                      (a stat block with none of it)
+         *
+         * @returns {string}
+         */
+        summaryText() {
+            const parts = []
+            if (this.race) parts.push(this.race)
+            if (this.background) parts.push(this.background)
+            if (this.level !== null) {
+                parts.push(this.classText ? `Level ${this.level} (${this.classText})` : `Level ${this.level}`)
+            } else if (this.classText) {
+                parts.push(this.classText)
+            }
+            return parts.join(' - ')
+        }
+
+        /** True when there is anything worth rendering. */
+        hasDetails() {
+            return this.summaryText().length > 0
+        }
+
+        /**
+         * The summary as one muted full-width cell for a ChatCards row — the
+         * roster line between a member's name and their ability tiles.
+         * Returns null when the sheet gave us nothing, so callers can skip the
+         * row entirely:
+         *
+         *     const row = member.details.detailCells(2)
+         *     if (row) card.addRow(row)
+         *
+         * @param {number} [span=2] - Columns the line should span.
+         * @returns {{content: string, style: string, span: number}|null}
+         */
+        detailCells(span = 2) {
+            if (!this.hasDetails()) return null
+            return ChatCards.Card.span(this.summaryText(), span, "muted")
+        }
+    }
+
+    /**
      * Represents a party member, holding information about their character sheet, name,
      * controlling player, avatar, and associated token data.
      */
@@ -329,6 +479,7 @@ const PartyMan = (() => {
             this.defaultToken = {}
             this.abilityScores = new MemberAbilityScores(this.id)
             this.skills = new MemberSkills(this.id)
+            this.details = new MemberDetails(this.id)
 
         }
 
@@ -355,13 +506,21 @@ const PartyMan = (() => {
             await this.skills.syncSkills()
         }
 
+        async syncDetails() {
+            await this.details.syncDetails()
+        }
+
         /**
          * Loads everything this member caches from the sheet, concurrently.
          *
          * @returns {Promise<Member>} this, once populated.
          */
         async syncSheet() {
-            await Promise.all([this.abilityScores.syncScores(), this.skills.syncSkills()])
+            await Promise.all([
+                this.abilityScores.syncScores(),
+                this.skills.syncSkills(),
+                this.details.syncDetails()
+            ])
             return this
         }
 
@@ -488,9 +647,9 @@ const PartyMan = (() => {
     }
 
     return {
-        SKILLS, PASSIVE_BASE, normalizeSkill, isSkill, skillDisplayName, modText,
+        SKILLS, PASSIVE_BASE, NO_VALUE, normalizeSkill, isSkill, skillDisplayName, modText,
         getParty, getMembers, memberCells,
         getCachedParty, refreshParty, getSyncedParty,
-        Member, Party, MemberAbilityScores, MemberSkills
+        Member, Party, MemberAbilityScores, MemberSkills, MemberDetails
     }
 })()
