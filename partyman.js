@@ -1,21 +1,17 @@
 //PartyMan - classes and utility for party management in Roll20 VTT
 // Requires ChatCards (THEME, Card) for chat output.
 on('ready', async () => {
-    log("Starting PartyMan")
-
     // The sync is the slow part, and it is awaited before the card goes out —
     // so the card appearing in chat IS the readiness signal: cache warm, every
     // script built on PartyMan can now read party data with zero sheet traffic.
     const party = await PartyMan.refreshParty()
-    log(`PartyMan ready — ${party.members.length} member(s) synced`)
-
-    let htmlButton = `<div style="text-align: center;">${ChatCards.Card.button("Display Party", "!pm party")}</div>`;
 
     const initCard = new ChatCards.Card("PartyMan Ready")
     initCard.addRow({
         content: `<div style="text-align:center;">${party.members.length} party member(s) synced</div>`,
         style: "muted"
     })
+    let htmlButton = `<div style="text-align: center;">${ChatCards.Card.button("Display Party", "!pm party")}</div>`;
     initCard.addRow(htmlButton)
     initCard.send('PartyMan')
 
@@ -26,8 +22,7 @@ on('ready', async () => {
             resyncQueued = true
             setTimeout(async () => {
                 resyncQueued = false
-                const fresh = await PartyMan.refreshParty()
-                sendChat('PartyMan', `/w gm Party re-synced — ${fresh.members.length} member(s).`)
+                await PartyMan.refreshParty()
             }, 500)
         }
     })
@@ -53,8 +48,7 @@ on('ready', async () => {
         }
 
         if (cmd === 'refresh') {
-            const party = await PartyMan.refreshParty()
-            sendChat('PartyMan', `/w gm Party re-synced — ${party.members.length} member(s).`)
+            await PartyMan.refreshParty()
         }
     });
 });
@@ -596,7 +590,15 @@ const PartyMan = (() => {
      * @returns {Promise<Party>}
      */
     const refreshParty = async () => {
+        let start = Date.now()
+        let startStamp = new Date(start)
+        log(`PartyMan re-syncing - ${startStamp}`)
         cachedParty = await new Party().syncParty()
+        let end = Date.now()
+        let duration = end - start
+        let seconds = duration / 1000
+        log(`PartyMan re-synced in ${seconds}s`)
+        sendChat('PartyMan', `/w gm Party re-synced — ${cachedParty.members.length} member(s) in ${seconds}s.`)
         return cachedParty
     }
 
