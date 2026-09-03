@@ -5,16 +5,20 @@
 // 2.) manage bars as well
 // 3.) clamp to 0
 // 3.) whisper early returns for visibility into issues
-// 4.) add target function !hp +7 for selected token(s) !hp --target abcd123 -5 for specific targeted token
+// 4.) add target function !hp up 7 for selected token(s) !hp up target abcd123 5 for specific targeted token
 on('ready', () => {
+
     on('chat:message', async msg => {
         if (msg.type !== 'api' || !/^!hp\b/i.test(msg.content)) return;
         if (!msg.selected || !msg.selected.length) return;
 
-        const [, raw] = msg.content.split(/\s+/);
+        const [, cmd, raw] = msg.content.split(/\s+/);
+
+        if (cmd === undefined) return;
+
         if (raw === undefined) return;
 
-        const item = 'hp';
+        const item = 'hp_current';
 
         for (const s of msg.selected.filter(x => x._type === 'graphic')) {
             const tok = getObj('graphic', s._id);
@@ -22,11 +26,21 @@ on('ready', () => {
             if (!charId) continue;
 
             try {
-                let value;
-                if (/^[+-]/.test(raw)) {
-                    const cur = await getSheetItem(charId, item);
+                let value = parseInt(raw);
+                if (isNaN(value)) {
+                    sendChat('HP', `/w gm ${tok.get('name')}: invalid value (${raw})`);
+                    continue;
+                }
+                if (cmd !== 'add' && cmd !== 'sub' && cmd !== 'set') {
+                    sendChat('HP', `/w gm ${tok.get('name')}: invalid command (${cmd})`);
+                    continue;
+                }
+                const cur = await getSheetItem(charId, item);
+                if (cmd === 'add') {
                     value = Number(cur) + Number(raw);
-                } else {
+                } else if (cmd === 'sub') {
+                    value = Number(cur) - Number(raw);
+                } else if (cmd === 'set') {
                     value = Number(raw);
                 }
                 await setSheetItem(charId, item, value);
