@@ -16,6 +16,7 @@ on('ready', async () => {
 
     // The actual spells available, this map serves as a registry of spells
     const spells = new Map([
+        ["acid-splash", {"name":"Acid Splash", "default_level": 0}],
         ["mage-hand", {"name":"Mage Hand", "default_level": 0}],
         ["spiritual-weapon", {"name":"Spiritual Weapon", "default_level": 2}],
     ]);
@@ -76,9 +77,9 @@ on('ready', async () => {
         // where it is
         const pageId = casterToken.get("pageid")
         const layer = casterToken.get("layer")
-        // up and to the right of the caster
-        const x = casterToken.get("left") + casterToken.get("width")
-        const y = casterToken.get("top") - casterToken.get("height")
+        // center of the caster
+        const x = casterToken.get("left")
+        const y = casterToken.get("top")
         // helper for sending chats as the character - format character|character_id outputs the character's name + avatar by default
         const casterSendAs = `character|${casterToken.get("represents")}`
 
@@ -182,8 +183,31 @@ on('ready', async () => {
          */
         switch (spell) {
             /***********************************************************************************************************
-            *************************************************MAGE HAND**************************************************
-            ***********************************************************************************************************/
+             *************************************************Acid Splash**************************************************
+             ***********************************************************************************************************/
+            case 'acid-splash':
+                // the find function notifies the gm on failure so we can just return if nothing is found
+                const acid = findSpellCharacter()
+                if (acid === undefined) return;
+
+                //Mage Hand uses cast and dismiss, leveraging the basic cast and dismiss functions
+                switch (cmd) {
+                    //sends a chat as caster and spawns in a mage hand token with fx
+                    case 'cast':
+                        basicCast(casterSendAs,spellData,castAtLevel,acid,pageId,layer,x,y)
+                        return;
+                    // the mage hand
+                    case 'trigger':
+                        basicDismiss(acid, 'burst-acid')
+                        return;
+                    default:
+                        whisperBack(`Invalid command for ${spell}`)
+                        return;
+                }
+
+            /***********************************************************************************************************
+             *************************************************MAGE HAND**************************************************
+             ***********************************************************************************************************/
             case 'mage-hand':
                 // the find function notifies the gm on failure so we can just return if nothing is found
                 const mh = findSpellCharacter()
