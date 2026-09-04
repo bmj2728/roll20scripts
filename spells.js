@@ -28,15 +28,6 @@
 * - using marketplace items to create tokens for spells
 * - having light effects visible immediately on spawn
 *
-* An example:
-* Spiritual Weapon checks that the caster has a spell slot available at the level requested, then spawns in
-* a token. I've set that character sheet up to use a multisided token with many weapons and colors as the default token.
-* I've also given it a proficiency bonus to match the caster's level
-*  and an attack that uses strength mod + pb for attack and 1d8 + strength mod
-* When the token is spawned, we set the token's strength to the same mod as the caster's spellcasting ability.
-* This automatically causes the spell character's attack action to use the correct modifiers.
-* When it's dismissed, we drop it back to 10
-* We also manage the slot use for the caster
 *
 * The framework allows for easy extensibility either through additional actions or arguments.
 *
@@ -44,28 +35,23 @@
 *
 */
 
-// Lookup for nicer text
-const spellLevels = new Map([
-    [0, "Cantrip"],
-    [1, "1st Level"],
-    [2, "2nd Level"],
-    [3, "3rd Level"],
-    [4, "4th Level"],
-    [5, "5th Level"],
-    [6, "6th Level"],
-    [7, "7th Level"],
-    [8, "8th Level"],
-    [9, "9th Level"],
-])
 
 // The actual spells available, this map serves as a registry of spells
 // name - string - the spell
-// default_level - number - the default level of the spell
 // template_width/template_height - number - the width/height of the spell template
 const spells = new Map([
-    ["acid-splash", {"name":"Acid Splash", "default_level": 0, "template_width": 140, "template_height": 140}],
-    ["mage-hand", {"name":"Mage Hand", "default_level": 0, "template_width": 70, "template_height": 70}],
-    ["spiritual-weapon", {"name":"Spiritual Weapon", "default_level": 2, "template_width": 70, "template_height": 70}],
+    /*
+    **************************************CANTRIPS********************************************
+     */
+    ["acid-splash", {"name":"Acid Splash", "template_width": 140, "template_height": 140}],
+    ["mage-hand", {"name":"Mage Hand", "template_width": 70, "template_height": 70}],
+    ["create-bonfire", {"name":"Create Bonfire", "template_width": 70, "template_height": 70}],
+
+    /*
+    **************************************2nd Level********************************************
+     */
+    ["spiritual-weapon", {"name":"Spiritual Weapon", "template_width": 70, "template_height": 70}],
+
 ]);
 
 on('ready', async () => {
@@ -89,7 +75,7 @@ on('ready', async () => {
         const [command, args] = msg.content.trim().split("--args ");
 
         // we parse the message into parts and validate/enrich
-        const [, action, spell, level] = command.trim().split(/\s+/);
+        const [, action, spell] = command.trim().split(/\s+/);
 
         // validate a spell was passed in and it's in the spell book
         if (spell === undefined || !spells.has(spell.toLowerCase())) {
@@ -105,31 +91,13 @@ on('ready', async () => {
             return;
         }
 
-        // handle default spell level
-        const castAtLevel = level === undefined ? spellData.default_level : parseInt(level)
-        // validate level is a valid number and in spell level range
-        if (isNaN(castAtLevel) || castAtLevel < 0 || castAtLevel > 9) {
-            whisperBack(`Invalid spell level - ${castAtLevel}`)
-            return
-        }
-        // can't cast a spell below the default level
-        if (castAtLevel < spellData.default_level) {
-            whisperBack(`${spellData.name} must be cast at ${spellLevels.get(castAtLevel)} or higher.`)
-            return
-        }
-        // cantrips don't require spell slots so we let the user know
-        if (spellData.default_level === 0 && castAtLevel !== 0) {
-            whisperBack(`${spellData.name} is a cantrip and does not require a spell slot!`)
-        }
-        // some helper text outputting `Cantrip` or `Nth Level Spell` (2nd Level Spell)
-        const castAtLevelText = castAtLevel === 0 ? `${spellLevels.get(castAtLevel)}` : `${spellLevels.get(castAtLevel)} spell`
-
         /*
         **********************CASTER/SPELL TEMPLATE INFO****************************
          */
 
         // caster info (or the spell token for spell actions/dismissal)
         const casterToken = getObj('graphic', msg.selected[0]._id)
+        const casterTokenId = casterToken.get("_id")
         // who is it
         const casterCharacter = casterToken.get("represents")
         // where it is
@@ -160,23 +128,23 @@ on('ready', async () => {
             return objs[0]
         }
 
-        const checkCasterSlots = async () => {
-            const casterSlots = await getSheetItem(casterToken.get("represents"), `lvl${castAtLevel}_slots_total`)
-            const casterSlotsExpended = await getSheetItem(casterToken.get("represents"), `lvl${castAtLevel}_slots_expended`)
-            if (casterSlotsExpended >= casterSlots) {
-                whisperBack(`You have no ${castAtLevelText} slots available to cast ${spells.get(spell.toLowerCase()).name}.`)
-                return {"hasSlots": false, "total": casterSlots, "expended": casterSlotsExpended};
-            }
-            return {"hasSlots": true, "total": casterSlots, "expended": casterSlotsExpended};
+        const setupToken = (token, disableSnapping=true) => {
+            token.toFront()
+            token.set("disableSnapping", disableSnapping)
+            token.set("disableTokenMenu", true)
+            token.set("tooltip", casterToken.get("name"))
+            token.set("show_tooltip", true)
+            token.set("bar1_value", casterTokenId)
+            token.set("bar1_num_permission", "hidden")
+            token.set("bar2_value", casterCharacter)
+            token.set("bar2_num_permission", "hidden")
         }
 
         // basic spawn helper - simply pops the character's default token or a token using their avatar near the caster
-        const spawnBasic = (obj,pageid,layer,x,y)=>{
+        const spawnBasic = (obj,pageid,layer,x,y, disableSnapping=false)=>{
             if(obj?.type === 'character'){
                 obj.createToken({pageid,layer,left:x,top:y},{multisided:'ensure'},(token)=>{
-                    token.toFront()
-                    token.set("disableSnapping", true)
-                    token.set("disableTokenMenu", true)
+                    setupToken(token, disableSnapping)
                 });
             }
         };
@@ -185,32 +153,34 @@ on('ready', async () => {
         // in addition to the basic spawn helper, this function also sets the strength of the token to 10 + (mod * 2)
         // mod is the spellcasting ability modifier of the caster
         // this allows an attack to be added to the token's sheet that dynamically updates based on caster
-        const spawnSpiritualWeapon = (obj,pageid,layer,x,y,mod, side)=>{
+        const spawnSpiritualWeapon = (obj,pageid,layer,x,y,mod,pb,side,disableSnapping=false)=>{
             if(obj?.type === 'character'){
                 obj.createToken({pageid,layer,left:x,top:y},{multisided:'ensure'}, async (token) => {
-                    token.toFront()
                     token.set("currentSide", side)
-                    token.set("disableSnapping", true)
-                    token.set("disableTokenMenu", true)
+                    setupToken(token, disableSnapping)
+                    let newStrength = 10 + ((mod+pb) * 2)
+                    let newDexterity = 10 + (mod * 2)
+                    await setSheetItem(token.get("represents"), "strength", newStrength)
+                    await setSheetItem(token.get("represents"), "dexterity", newDexterity)
+                });
+            }
+        };
+
+        const spawnCreateBonfire = (obj,pageid,layer,x,y,mod, disableSnapping=false)=>{
+            if(obj?.type === 'character'){
+                obj.createToken({pageid,layer,left:x,top:y},{multisided:'ensure'}, async (token) => {
+                    setupToken(token, disableSnapping)
                     let newStrength = 10 + (mod * 2)
                     await setSheetItem(token.get("represents"), "strength", newStrength)
                 });
             }
         };
 
-        const basicCast = (casterSendAs,spellData,castAtLevel,spellCharacter,pageId,layer,x,y, fx = "none")=>{
-            sendChat(casterSendAs, `Casting ${spellData.name} as a ${castAtLevelText}.`)
+        const basicCast = (spellCharacter,pageId,layer,x,y, fx = "none", disableSnapping=false)=>{
             if(fx !== "none"){
                 spawnFx(x, y, fx)
             }
-            spawnBasic(spellCharacter, pageId, layer, x, y)
-        }
-
-        const basicCastAtLevel = async (casterSendAs,spellData,castAtLevel,spellCharacter,pageId,layer,x,y, fx = "none")=>{
-            const hasSpellSlot = await checkCasterSlots()
-            if (!hasSpellSlot.hasSlots) return;
-            basicCast(casterSendAs,spellData,castAtLevel,spellCharacter,pageId,layer,x,y, fx)
-            await setSheetItem(casterToken.get("represents"), `lvl${castAtLevel}_slots_expended`, hasSpellSlot.expended + 1)
+            spawnBasic(spellCharacter, pageId, layer, x, y, disableSnapping)
         }
 
         const basicDismiss = (spellCharacter, fx = "none")=>{
@@ -228,24 +198,37 @@ on('ready', async () => {
             casterToken.remove()
         }
 
-        const spiritualWeaponCast = async (casterSendAs,spellData,castAtLevel,spellCharacter,pageId,layer,x,y,side) => {
-            const hasSpellSlot = await checkCasterSlots()
-            if (!hasSpellSlot.hasSlots) return;
+        const spiritualWeaponCast = async (spellCharacter,pageId,layer,x,y,side, disableSnapping=false) => {
             // to dynamically update the weapon
             const casterSpellcastingAbility = await getSheetItem(casterToken.get("represents"), "spellcasting_ability")
             const casterSpellcastingMod = parseInt(casterSpellcastingAbility.slice(0,-1))
-            // casting
-            sendChat(casterSendAs, `Casting ${spellData.name} as a ${castAtLevelText}.`)
+            const casterProficiency = await getSheetItem(casterToken.get("represents"), "pb")
+            const casterPB = parseInt(casterProficiency)
             spawnFx(x, y, "glow-holy")
-            spawnSpiritualWeapon(spellCharacter, pageId, layer, x, y, casterSpellcastingMod, side)
-            // mark the slot
-            await setSheetItem(casterToken.get("represents"), `lvl${castAtLevel}_slots_expended`, hasSpellSlot.expended + 1)
+            spawnSpiritualWeapon(spellCharacter, pageId, layer, x, y, casterSpellcastingMod, casterPB, side, disableSnapping)
         }
 
         const spiritualWeaponDismiss = async (spellCharacter) => {
             basicDismiss(spellCharacter, "nova-holy")
             await setSheetItem(casterToken.get("represents"), "strength", 10)
+            await setSheetItem(casterToken.get("represents"), "dexterity", 10)
         }
+
+        const castCreateBonfire = async (cb,pageId,layer,cbX,cbY) => {
+            const casterSpellcastingAbility = await getSheetItem(casterToken.get("represents"), "spellcasting_ability")
+            const casterSpellcastingMod = parseInt(casterSpellcastingAbility.slice(0,-1))
+            const casterProficiency = await getSheetItem(casterToken.get("represents"), "pb")
+            const casterPB = parseInt(casterProficiency)
+            let mod = casterSpellcastingMod + casterPB
+            spawnFx(cbX,cbY,'burn-fire')
+            spawnCreateBonfire(cb,pageId,layer,cbX,cbY,mod)
+        }
+
+        const dismissCreateBonfire = async (spellCharacter) => {
+            basicDismiss(spellCharacter, "explode-smoke")
+            await setSheetItem(casterToken.get("represents"), "strength", 10)
+        }
+
 
         /*
         ***********************************SPELL LOGIC*********************************************
@@ -253,25 +236,39 @@ on('ready', async () => {
 
 
         switch (spell) {
-            /***********************************************************************************************************
-             *************************************************Acid Splash**************************************************
-             ***********************************************************************************************************/
+
+            /*
+            ***********************************CANTRIPS*********************************************
+            */
+
+            /*
+            **********************************************************************************************************
+            *************************************************Acid Splash**********************************************
+            **********************************************************************************************************
+            */
             case 'acid-splash':
                 // the find function notifies the gm on failure so we can just return if nothing is found
                 const acid = findSpellCharacter()
                 if (acid === undefined) return;
 
-                let posX = casterRight + (spells.get(spell).template_width / 2)
-                let posY = casterTop - (spells.get(spell).template_height / 2)
+                let acidX = casterRight + (spells.get(spell).template_width / 2)
+                let acidY = casterTop - (spells.get(spell).template_height / 2)
 
                 //Acid Splash uses cast and trigger, leveraging the basic cast and dismiss functions
                 switch (action) {
                     //sends a chat as caster and spawns in a mage hand token with fx
                     case 'cast':
-                        basicCast(casterSendAs,spellData,castAtLevel,acid,pageId,layer,posX,posY)
+                        basicCast(acid,pageId,layer,acidX,acidY, "none", true)
                         return;
-                    // the mage hand
+                    // trigger the actual ability
                     case 'trigger':
+                        let owner = casterToken.get("bar2_value")
+                        let ability = findObjs({ _type: 'ability', _characterid: owner, name:"Acid_Splash"})[0]
+                        if(!ability){
+                            whisperBack(`Acid Splash ability not found for ${casterToken.get("name")}`)
+                        } else {
+                            sendChat(casterSendAs, `${ability.get("action")}`)
+                        }
                         basicDismiss(acid, 'burst-acid')
                         return;
                     default:
@@ -291,11 +288,37 @@ on('ready', async () => {
                 switch (action) {
                     //sends a chat as caster and spawns in a mage hand token with fx
                     case 'cast':
-                        basicCast(casterSendAs,spellData,castAtLevel,mh,pageId,layer,x,y, 'glow-magic')
+                        basicCast(mh,pageId,layer,x,y, 'glow-magic')
                         return;
                     // the mage hand
                     case 'dismiss':
                         basicDismiss(mh, 'nova-magic')
+                        return;
+                    default:
+                        whisperBack(`Invalid command for ${spell}`)
+                        return;
+                }
+            /***********************************************************************************************************
+             *************************************************CREATE BONFIRE********************************************
+             ***********************************************************************************************************/
+            case 'create-bonfire':
+
+                let cbX = casterRight + (spells.get(spell).template_width / 2)
+                let cbY = y
+
+                const cb = findSpellCharacter()
+                if (cb === undefined) return;
+
+                switch (action) {
+                    case 'cast':
+                        await castCreateBonfire(cb,pageId,layer,cbX,cbY)
+                        return;
+                    case 'trigger':
+                        spawnFx(x,y,'burn-fire')
+                        sendChat(casterSendAs,`%{${cb.get('name')}|Bonfire}`)
+                        return;
+                    case 'dismiss':
+                        basicDismiss(cb, 'explode-smoke')
                         return;
                     default:
                         whisperBack(`Invalid command for ${spell}`)
@@ -341,7 +364,7 @@ on('ready', async () => {
                     // the spiritual weapon sheet should be leveled when characters increase proficiency bonus
                     case 'cast':
                         // confirm the caster has the slot available
-                        await spiritualWeaponCast(casterSendAs,spellData,castAtLevel,sw,pageId,layer,x,y, side)
+                        await spiritualWeaponCast(sw,pageId,layer,x,y,side)
                         return;
 
                     case 'dismiss':
@@ -360,3 +383,4 @@ on('ready', async () => {
         }
     });
 });
+
