@@ -3,31 +3,38 @@
 * Flexible spellcasting system
 *
 * Anatomy of a command:
-* !spells action spell [level] [--args ...argsList]
+* !spells action spell [--args ...argsList]
 * !spells - this lets the script identify api messages it needs to process
 * action - this is the verb that tells the script what action to take. Typically, cast, dismiss, or trigger.
 * spell - this tells the script what spell to cast. See spell for available actions and args
-* [level] - optionally tells the script what level to cast the spell at; otherwise the default level is used
 * [--args ...argsList] - optionally tells the script what additional arguments to pass to the spell
 *
-* Basic usage: !spells cast spiritual-weapon (casts at level 2)
-* With a level: !spells cast spiritual-weapon 4 (casts at level 4)
+* Basic usage: !spells cast spiritual-weapon
 * With args: !spells cast spiritual-weapon --args sword-red (casts at level 2 and sets the token to the red sword side)
-* With args and level: !spells cast spiritual-weapon 4 --args morningstar green (casts at level 4 and sets the token to the green morningstar side)
-*
 *
 * Each spell is responsible for handling its own logic for its actions, including any additional arguments passed to it.
 * It's suggested to use consistent action names unless a spell calls for specific unique behavior.
 *
 * The script requires creating character objects for each spell to be used as a template.
 * They, minimally, should be named as entered in the spells map and given an avatar image.
-* It's recommended to create a default token for the `spell character` with appropriate settings
+* It's recommended to create a default token for the `spell character` with appropriate s   ettings
 * The spell-as-a-character framework coupled with default tokens allows:
 * - dynamically altering summons based on caster
 * - creating macros on summons to trigger actions, dismissals, or effects
 * - using marketplace items to create tokens for spells
 * - having light effects visible immediately on spawn
-*
+* - spawned templates reference the caster
+* - Cantrips can be called by the API without issue at this time
+* - Leveled spell actions trigger an upcast menu that cause issues with the api
+* - Several workarounds are available to address this issue, including:
+*   - let the sheet do the work and just spawn in the token (see example)
+*   - fully program in the spell and slot logic, bypassing the sheet item entirely
+*   - implement a template command to drop the template, then hook the trigger to the spell token action
+* Example:
+```
+ %{-P-AIffo-0xgZ09Xynah|repeating_spell-2_fCGSoyeZn_spell}
+ !spells cast spiritual-weapon --args ?{Form?|Axe Blue,axe-blue|Axe Green,axe-green|Axe Red,axe-red|Hammer Blue,hammer-blue|Hammer Green,hammer-green|Hammer Red,hammer-red|Morningstar Blue,morningstar-blue,|Morningstar Green,morningstar-green|Morningstar Red,morningstar-red|Sword Blue,sword-blue|Sword Green,sword-green|Sword Red,sword-red}
+```
 *
 * The framework allows for easy extensibility either through additional actions or arguments.
 *
@@ -184,18 +191,30 @@ on('ready', async () => {
         }
 
         const basicDismiss = (spellCharacter, fx = "none")=>{
+            // need a token
             if (casterToken === undefined) {
                 whisperBack("No token selected")
                 return;
             }
-            if (spellCharacter.get("_id") !== casterToken.get("represents")) {
-                whisperBack(`Selected token does not represent ${spellCharacter.get("name")}`)
+            // case where the spell template is calling the api
+            if (spellCharacter.get("_id") === casterToken.get("represents")) {
+                if (fx !== "none") {
+                    spawnFx(casterToken.get("left"), casterToken.get("top"), fx)
+                }
+                casterToken.remove()
                 return;
             }
-            if (fx !== "none") {
-                spawnFx(casterToken.get("left"), casterToken.get("top"), fx)
+            //check if the caster is the owner
+            const existing = findObjs({ _type: 'graphic', _pageid: pageId, represents: spellCharacter.get('_id') })[0]
+            if (existing.get("bar2_value") === casterCharacter) {
+                if (fx !== "none") {
+                    spawnFx(existing.get("left"), existing.get("top"), fx)
+                }
+                existing.remove()
+                return;
             }
-            casterToken.remove()
+            whisperBack(`no token found for ${spellCharacter.get("name")}`)
+            log(spellCharacter, existing)
         }
 
         const spiritualWeaponCast = async (spellCharacter,pageId,layer,x,y,side, disableSnapping=false) => {
@@ -254,22 +273,31 @@ on('ready', async () => {
                 let acidX = casterRight + (spells.get(spell).template_width / 2)
                 let acidY = casterTop - (spells.get(spell).template_height / 2)
 
+                const existing = findObjs({ _type: 'graphic', _pageid: pageId, represents: acid.get('_id') })[0]
+
                 //Acid Splash uses cast and trigger, leveraging the basic cast and dismiss functions
                 switch (action) {
-                    //sends a chat as caster and spawns in a mage hand token with fx
-                    case 'cast':
+
+                    case 'template':
+                        if(existing){
+                            whisperBack(`Acid Splash template already exists`)
+                            sendPing(existing.get("left"), existing.get("top"), pageId, null, true, who)
+                            return;
+                        }
                         basicCast(acid,pageId,layer,acidX,acidY, "none", true)
                         return;
                     // trigger the actual ability
                     case 'trigger':
-                        let owner = casterToken.get("bar2_value")
-                        let ability = findObjs({ _type: 'ability', _characterid: owner, name:"Acid_Splash"})[0]
-                        if(!ability){
-                            whisperBack(`Acid Splash ability not found for ${casterToken.get("name")}`)
-                        } else {
-                            sendChat(casterSendAs, `${ability.get("action")}`)
+                        let owner = existing.get("bar2_value")
+                        // let ability = findObjs({ _type: 'ability', _characterid: owner, name:"Acid_Splash"})[0]
+                        // if(!ability){
+                        //     whisperBack(`Acid Splash ability not found for ${casterToken.get("name")}`)
+                        // } else {
+                        //     sendChat(casterSendAs, `${ability.get("action")}`)
+                        // }
+                        if (casterCharacter === owner || casterTokenId === existing.get("_id")) {
+                            basicDismiss(acid, 'burst-acid')
                         }
-                        basicDismiss(acid, 'burst-acid')
                         return;
                     default:
                         whisperBack(`Invalid command for ${spell}`)
@@ -318,7 +346,7 @@ on('ready', async () => {
                         sendChat(casterSendAs,`%{${cb.get('name')}|Bonfire}`)
                         return;
                     case 'dismiss':
-                        basicDismiss(cb, 'explode-smoke')
+                        await dismissCreateBonfire(cb)
                         return;
                     default:
                         whisperBack(`Invalid command for ${spell}`)
